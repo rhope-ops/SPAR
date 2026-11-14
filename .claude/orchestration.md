@@ -1,6 +1,6 @@
 # Orchestration: more than one agent
 
-Read this file when you delegate work or run more than one agent. AGENTS.md "Delegation" points here. The owner's decisions (2026-11-10): the orchestrator stays on the strongest model; models are chosen per task with the routing table below. Routing names tiers; the table below maps them to Claude models.
+Read this file when you delegate work or run more than one agent. AGENTS.md "Delegation" points here. The Administrator's decisions (2026-11-10): the orchestrator stays on the strongest model; models are chosen per task with the routing table below. Routing names tiers; the table below maps them to Claude models.
 
 ## Agents (.claude/agents/)
 
@@ -65,10 +65,10 @@ Branch per worker: the branch the host requires (Claude cloud sessions: `claude/
 ## Review and merge
 
 1. Scope: `git diff --stat origin/main...origin/<branch>`. Flag files outside the brief.
-2. Update by merge, never rebase: `git checkout -B review/<branch> origin/<branch> && git merge origin/main`. When intents conflict, stop and list the choice for the owner.
+2. Update by merge, never rebase: `git checkout -B review/<branch> origin/<branch> && git merge origin/main`. When intents conflict, stop and list the choice for the Administrator.
 3. Fresh review: `reviewer` with only the diff and the brief. Verify each finding before you report it.
 4. Checks: the commands in AGENTS.md "Commands". Report before and after numbers.
-5. Merge: `git checkout main && git merge --no-ff review/<branch>`, confirm `git merge-base --is-ancestor origin/main HEAD`, push, verify origin/main. UI or design changes the owner has not approved wait for the owner's yes (AGENTS.md "Delivery").
+5. Merge: `git checkout main && git merge --no-ff review/<branch>`, confirm `git merge-base --is-ancestor origin/main HEAD`, push, verify origin/main. UI or design changes the Administrator has not approved wait for the Administrator's yes (AGENTS.md "Delivery").
 
 ## Lanes (fill in per project, in AGENTS.md "Project rules")
 
