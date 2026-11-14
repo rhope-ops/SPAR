@@ -1,7 +1,6 @@
-# Next prompt: {{PROJECT_NAME}}
-> Template: first use fills in the {{...}} values and deletes this line.
+# Next prompt: SPAR
 
-Updated: {{DATE}} by bootstrap. Keep this file at 40 lines or fewer. The current request overrides it.
+Updated: 2026-11-14 by bootstrap. Keep this file at 40 lines or fewer. The current request overrides it.
 
 ## State
 
@@ -11,7 +10,7 @@ Updated: {{DATE}} by bootstrap. Keep this file at 40 lines or fewer. The current
 
 1. Add the first project rules to AGENTS.md "Project rules".
 
-## Needs the owner
+## Needs the Administrator
 
 - None.
 

@@ -15,7 +15,7 @@ Usage:
 Opt-in: the guard runs only in a repo with a `.pii-guard` file at its root (the hook and the Action check for it).
 That file lists exact strings that are allowed (one per line, `#` comments), and paths to skip as
 `skip: <path or glob>` lines (for example a public reference text that quotes office contacts), and the option line
-`denylist: warn` (starter tier; kit default since 2026-11-13): with no denylist, --require-denylist warns instead of failing. Only the owner adds entries;
+`denylist: warn` (starter tier; kit default since 2026-11-13): with no denylist, --require-denylist warns instead of failing. Only the Administrator adds entries;
 agents never add one to get past a block (AGENTS.md "Personal data").
 
 Name denylist (never committed): one name or word per line, `#` comments, matched whole-word, any case.

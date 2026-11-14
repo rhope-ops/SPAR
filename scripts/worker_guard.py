@@ -93,7 +93,7 @@ def check_git(args, branch, readonly=False):
     if sub == 'clean':
         return 'no git clean; ask the orchestrator'
     if sub == 'branch' and branch_delete(rest):
-        return 'no branch deletes; the orchestrator or the owner deletes branches'
+        return 'no branch deletes; the orchestrator or the Administrator deletes branches'
     if sub != 'push':
         return None
     pos, cut = [], None
