@@ -3,7 +3,7 @@
 This file is the source of truth for every Claude agent on this repo, subagents included. CLAUDE.md imports it, so Claude Code loads it at start; in a claude.ai chat, read it first. Put rules specific to this project in "Project rules" at the end. "Owner" is the name agents use for the person who decides; a public repo uses a role (for example "the maintainer") instead of a real name. A rule marked "kit default" came with the kit, not from the Administrator; the Administrator may change it.
 
 - Repo: rhope-ops/SPAR
-- Purpose: SharePoint Administrator: see and change site groups and permissions with permission trees, drag and drop, bulk actions and pass/fail rights checks.
+- Purpose: SharePoint Administrator: group owners and site admins see and change site groups and permissions with ownership and access views, bulk actions, requests to owners and a GAL sync.
 - Owner: the Administrator
 - Time zone: America/Chicago
 - Tier: full
@@ -151,4 +151,4 @@ The project log records how the project got there (milestones, breakthroughs, mi
 
 <!-- Add rules for this project below. Date each decision by the Administrator, for example "(the Administrator, 2026-11-09)". -->
 - Project log: https://claude.ai/artifact/9d1L6ydRrhwx1U2CXo7Dw2 (private Claude doc; the Administrator, 2026-11-14). This repo is public, so log entries never go in it.
-- Platform (the Administrator, 2026-11-14): a RADE window app (WPF in Windows PowerShell 5.1, PnP.PowerShell 1.12.0). Information only until the Administrator asks for a build; capability report: https://claude.ai/artifact/5KPZmF6FbJBB41wqG22C9w (private).
+- Platform (the Administrator, 2026-11-15): a canvas Power App with Power Automate flows, one copy for each wing, imported by RADE. Spec: docs/specs/spar.md. No build until the Administrator approves the spec and asks; capability report: https://claude.ai/artifact/5KPZmF6FbJBB41wqG22C9w (private).
