@@ -65,6 +65,7 @@ REC, optional requirements (agent proposals, not decisions; each stays out of th
 ## Constraints
 
 - Platform: canvas Power App and Power Automate cloud flows; standard connectors only (SharePoint, Office 365 Users, Approvals or Outlook if R6 needs a notice). Each write to a group or a permission is a flow that uses "Send an HTTP request to SharePoint" as the user.
+- One window, central (D15): the app and its flows are in one solution. The app sends an operation name and a list of rows to one dispatcher flow, which makes the SharePoint calls and returns pass or fail for each row. A new operation is a new branch of that flow, not a new flow. No script runs on the user's computer. A canvas Power App cannot start PowerShell on a computer without a premium desktop flow, a cloud runbook or an installed handler; none of these is permitted here.
 - The work tenant's rules in https://github.com/rhope-ops/RADE/blob/main/docs/engine.md apply: no reconnaissance; no write across the DoD365 boundary; a probe says what it reads and reports counts only.
 - Published limits (Microsoft, read 2026-11-15 from the documentation source on GitHub; Confidence: high for the text, medium for this tenant):
   - Office 365 Users has 5 functions: DirectReports, Manager, MyProfile, SearchUser, UserProfile. The search term "Applies to: display name, given name, surname, mail, mail nickname, and user principal name". It has no filter by department, office or company. A profile gives CompanyName, Department, DisplayName, JobTitle, OfficeLocation and others. Source: https://learn.microsoft.com/en-us/power-apps/maker/canvas-apps/connections/connection-office365-users
@@ -92,6 +93,7 @@ All by the Administrator, 2026-11-15, scope SPAR.
 | D11 | Sync proposes, then applies. Offboard = proposed removal from all SharePoint groups and direct grants on the site. | Apply at once; automatic groups only; flag only |
 | D12 | The change record is a list on the same site; no file on the computer. | No record; counts only |
 | D14 | Measure first: the platform (D1) is confirmed or changed after the probe round, from P5, P8 and P9. Candidates: Power App only; Power App for owners plus a PowerShell and PnP window for the admin's bulk work and Sync; window app only. RSAT is optional in each. | Change the platform now, with no numbers |
+| D15 | One window: the Power App fires a modular operation for what is done on screen, through one dispatcher flow in the same solution. Central, nothing for the user to extract or run. No obfuscation. | PowerShell scripts started by the app (not possible with no install); a second PowerShell window beside the app |
 | D13 | Bulk delete covers people from groups, people from the site, groups and direct grants, and content, limited to what the account's rights permit. Safety: preview with counts, typed confirm, recycle bin only, never the last owner or yourself. | — |
 
 ## Acceptance checks
@@ -145,6 +147,7 @@ Probe rows (P) run in one RADE round on the work tenant and report pass or fail 
 - Flow run history keeps data for 30 days · REC: R16, P6 and V11.
 - A bad GAL field removes access from many people · REC: R10, E2, E3.
 - One copy for each wing means each update is a new import at each wing · REC: the version in the app and RADE's newer-version notice.
+- A flow is permanent after the import, but Microsoft may turn off a flow that is not triggered for 90 days (source: the limits page in Constraints), and a flow whose importing account is removed has no owner · REC: at start the app checks that the dispatcher flow answers and says what to do if not; each wing names a second owner at import.
 - Bulk speed depends on flow limits: each action in a Power App is a flow run · REC: P5 sets the batch size; P8 compares it with PnP before the build (D14).
 
 ## Build order
