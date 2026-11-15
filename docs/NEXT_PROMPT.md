@@ -10,7 +10,7 @@ Updated: 2026-11-15. Keep this file at 40 lines or fewer. The current request ov
 ## Open (in order)
 
 1. The Administrator approves the spec (then set "Status: Approved" with the date).
-2. Build phase 0: the probe round P1 to P7 (spec "Acceptance checks"), delivered through RADE, counts only.
+2. Build phase 0: the probe round P1 to P9 (spec "Acceptance checks"), delivered through RADE, counts only; then the Administrator decides the platform (spec D14).
 3. At the first code change: propose `scripts/check.local.sh` (AGENTS.md "Delivery").
 
 ## Needs the Administrator

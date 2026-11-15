@@ -91,6 +91,7 @@ All by the Administrator, 2026-11-15, scope SPAR.
 | D10 | Custom groups come from a rule builder with dropdowns and a search for users and terms. Rank is a main attribute. | — |
 | D11 | Sync proposes, then applies. Offboard = proposed removal from all SharePoint groups and direct grants on the site. | Apply at once; automatic groups only; flag only |
 | D12 | The change record is a list on the same site; no file on the computer. | No record; counts only |
+| D14 | Measure first: the platform (D1) is confirmed or changed after the probe round, from P5, P8 and P9. Candidates: Power App only; Power App for owners plus a PowerShell and PnP window for the admin's bulk work and Sync; window app only. RSAT is optional in each. | Change the platform now, with no numbers |
 | D13 | Bulk delete covers people from groups, people from the site, groups and direct grants, and content, limited to what the account's rights permit. Safety: preview with counts, typed confirm, recycle bin only, never the last owner or yourself. | — |
 
 ## Acceptance checks
@@ -105,6 +106,8 @@ Probe rows (P) run in one RADE round on the work tenant and report pass or fail 
 | P4 | R9 | Flow tries to list people by office symbol with SearchUser | Count returned equals the known count of a small test unit |
 | P5 | R5, E7 | Flow writes 50, 500 and 2,000 memberships; time each | Times reported; none lost; batches over 120 s continue in parts |
 | P6 | R16 | Run history of a flow with secure inputs and outputs on | The person fields show as hidden |
+| P8 | R5, E7 | The same 50 membership changes on a TEST group, by flow (P5) and by PowerShell with PnP.PowerShell 1.12.0; time each | Both times reported in seconds; the Administrator decides the platform from them (D14) |
+| P9 | R9 | PowerShell with PnP, no RSAT: list people by office symbol through the SharePoint people search, with the user's own account | Count returned equals the known count of the small test unit of P4 |
 | P7 | R18, E10 | Save and import with SharePoint, Office 365 Users and Approvals in one environment | Import ends with no data policy error; else the step prints FAILED with the connector name |
 | V1 | R1, E1 | Sign in as: group owner with no site rights; site admin | Owner sees only owner functions and the E1 notice; admin sees all |
 | V2 | R2, R3, E4 | Test site with 6 groups in a 3-level ownership chain, 1 ownerless group, 1 loop | Tree matches the fixture; the 2 defects are marked |
@@ -129,6 +132,7 @@ Probe rows (P) run in one RADE round on the work tenant and report pass or fail 
 
 ## Open questions
 
+- The platform after the probe (D14) · the Administrator, from P5, P8, P9 · every build phase after 0. If it changes, this spec changes first.
 - Which of O1 to O4 are kept · the Administrator · the size of build phase 1.
 - The number for a "large" change in R14 (REC: 25) · the Administrator · build phase 2.
 - How the change record and rules lists are protected when every user must write to them (REC: item-level "read own" on the record, proven as capability function 21) · decided after the probe · build phase 2.
@@ -141,7 +145,7 @@ Probe rows (P) run in one RADE round on the work tenant and report pass or fail 
 - Flow run history keeps data for 30 days · REC: R16, P6 and V11.
 - A bad GAL field removes access from many people · REC: R10, E2, E3.
 - One copy for each wing means each update is a new import at each wing · REC: the version in the app and RADE's newer-version notice.
-- Bulk speed depends on flow limits · REC: P5 sets the batch size before the build.
+- Bulk speed depends on flow limits: each action in a Power App is a flow run · REC: P5 sets the batch size; P8 compares it with PnP before the build (D14).
 
 ## Build order
 
@@ -149,7 +153,7 @@ Each phase needs its own approval. The spec changes first if a probe result chan
 
 | Phase | Content | Blocked by |
 |---|---|---|
-| 0 | Probe round P1 to P7 | — |
+| 0 | Probe round P1 to P9, then the platform decision (D14) | — |
 | 1 | Read-only: R1 to R4, R17 (and O1, O2 if kept) | P2 |
 | 2 | Changes: R5, R13, R14, R15, R16 | P1, P5, P6 |
 | 3 | Requests: R6 | Phase 2 |
