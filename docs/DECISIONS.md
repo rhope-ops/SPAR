@@ -4,6 +4,7 @@ Newest first. Why the kit defaults are what they are: https://github.com/rhope-o
 
 | Date | Decision | By | Replaces |
 |---|---|---|---|
+| 2026-11-15 | The SPAR spec is approved ([docs/specs/spar.md](specs/spar.md), D16): "why does this person have access" and the clean-up list are kept; the typed confirm starts at 25 people. No build until the Administrator asks. Scope: SPAR. | the Administrator | — |
 | 2026-11-15 | One window: the Power App fires a modular operation for what is done on screen, through one dispatcher flow in the same solution; no script on the user's computer (D15 in [docs/specs/spar.md](specs/spar.md)). Scope: SPAR. | the Administrator | — |
 | 2026-11-15 | Measure first: the SPAR platform is confirmed or changed after the probe round, from the timing of 50 changes by flow against PowerShell with PnP and from a unit list read without RSAT (D14, P8, P9 in [docs/specs/spar.md](specs/spar.md)). Until then the Power App row below stands. Scope: SPAR. | the Administrator | — |
 | 2026-11-15 | SPAR scope and approach: decisions D2 to D13 in [docs/specs/spar.md](specs/spar.md) "Decisions" (users = anyone who owns a SharePoint group; one copy for each wing by RADE; SharePoint groups only; GAL only, nothing exported; ownership and access views; requests to owners; suggested unit groups; rule builder; Sync proposes then applies; change record on the site; bulk delete with safety). The spec is the canonical place. Scope: SPAR. | the Administrator | — |

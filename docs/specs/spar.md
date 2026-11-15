@@ -1,6 +1,6 @@
 # Spec: SPAR
 
-Status: Draft · Owner: the Administrator · Updated: 2026-11-15
+Status: Approved 2026-11-15 · Owner: the Administrator · Updated: 2026-11-15
 
 ## Goal
 
@@ -25,23 +25,20 @@ Each acceptance check below passes: probe rows and device rounds on the work ten
 - R11. A rule builder defines custom groups: attribute dropdown (rank, office symbol, unit, job title, department), operator, value, and a search for named users and terms, with a live count of matches. Rules are saved in a list on the site and hold no person data.
 - R12. Site admin functions: remove selected people from the site; delete selected groups; remove direct grants and restore inheritance; delete selected lists, libraries, folders and files.
 - R13. Each change (R5, R6, R8 to R10, R12) shows a preview with counts first, then pass or fail for each row, and reads the changed object again to confirm the result.
-- R14. Delete safety: a typed count is needed for a content delete, a group delete, or a change to 25 or more people (REC number, see Open questions); content goes to the site recycle bin only; an action that removes the last owner of the site or of a group, or the user's own Full Control, is blocked.
+- R14. Delete safety: a typed count is needed for a content delete, a group delete, or a change to 25 or more people; content goes to the site recycle bin only; an action that removes the last owner of the site or of a group, or the user's own Full Control, is blocked.
 - R15. Each change writes one row to a change record list on the same site: person, group or object, action, by whom, when. No rank, office symbol, unit or other GAL attribute is stored.
 - R16. No export: no GAL attribute is written to a file, an e-mail, the change record, the rules list, or flow run history. Each flow action that carries person data has secure inputs and secure outputs on.
 - R17. Microsoft 365 group members are shown read-only as "managed in Microsoft 365". A removal preview shows the count of selected people who keep access through a Microsoft 365 group.
 - R18. Delivery: SPAR is a RADE application (https://github.com/rhope-ops/RADE/blob/main/docs/make-an-app.md). Each wing imports its own copy through a RADE guided step. The app shows its installed version. It uses standard connectors only and needs no install on the user's computer.
 
-REC, optional requirements (agent proposals, not decisions; each stays out of the build until the Administrator keeps it):
-
-- O1. "Why does this person have access?": select a person, see each path to each level on each node.
-- O2. Clean-up list: groups with no owner, empty groups, accounts that no longer exist, direct grants to single persons, nodes with unique permissions.
-- O3. "Copy access from": give a new person the same groups as a named person.
-- O4. Compare two people or two groups side by side.
+- R19. "Why does this person have access?": for a selected person, SPAR lists each path (direct grant, or through which group) to each level on each node the account can read.
+- R20. Clean-up list: groups with no owner, empty groups, accounts that no longer exist, direct grants to single persons, and nodes with unique permissions, each with a count.
 
 ## Out of scope
 
 - Changes to Microsoft 365 group membership.
 - Drag and drop.
+- "Copy access from" a named person, and a side-by-side compare of two people or groups (agent proposals, not kept on 2026-11-15).
 - Permission edits on single files.
 - Any export, report file or e-mail that holds names or GAL attributes.
 - Scheduled or unattended Sync.
@@ -94,6 +91,7 @@ All by the Administrator, 2026-11-15, scope SPAR.
 | D12 | The change record is a list on the same site; no file on the computer. | No record; counts only |
 | D14 | Measure first: the platform (D1) is confirmed or changed after the probe round, from P5, P8 and P9. Candidates: Power App only; Power App for owners plus a PowerShell and PnP window for the admin's bulk work and Sync; window app only. RSAT is optional in each. | Change the platform now, with no numbers |
 | D15 | One window: the Power App fires a modular operation for what is done on screen, through one dispatcher flow in the same solution. Central, nothing for the user to extract or run. No obfuscation. | PowerShell scripts started by the app (not possible with no install); a second PowerShell window beside the app |
+| D16 | The spec is approved. "Why does this person have access" (R19) and the clean-up list (R20) are kept. The typed confirm starts at 25 people (R14). | "Copy access from" and compare: not kept |
 | D13 | Bulk delete covers people from groups, people from the site, groups and direct grants, and content, limited to what the account's rights permit. Safety: preview with counts, typed confirm, recycle bin only, never the last owner or yourself. | — |
 
 ## Acceptance checks
@@ -124,6 +122,8 @@ Probe rows (P) run in one RADE round on the work tenant and report pass or fail 
 | V11 | R16, R15 | After V4 to V10: search the site lists, flow run history and the user's computer for the invented rank and office values | 0 hits |
 | V12 | R17 | Remove 3 people, 2 of whom are in the Microsoft 365 group | Preview shows "2 keep access through Microsoft 365" |
 | V13 | E8 | A second account removes a member between preview and Apply | SPAR shows the difference before it applies |
+| V15 | R19 | Fixture person with 1 direct grant and access through 2 groups | 3 paths shown, each with the right level and node |
+| V16 | R20 | The V2 and V3 fixtures plus 1 empty group and 1 deleted account | Each of the 5 lists shows the fixture count |
 | V14 | R18 | A second wing account imports through the RADE step on a second site | Import PASS; the app shows its version; V1 passes there |
 
 ## Assumptions
@@ -135,8 +135,6 @@ Probe rows (P) run in one RADE round on the work tenant and report pass or fail 
 ## Open questions
 
 - The platform after the probe (D14) · the Administrator, from P5, P8, P9 · every build phase after 0. If it changes, this spec changes first.
-- Which of O1 to O4 are kept · the Administrator · the size of build phase 1.
-- The number for a "large" change in R14 (REC: 25) · the Administrator · build phase 2.
 - How the change record and rules lists are protected when every user must write to them (REC: item-level "read own" on the record, proven as capability function 21) · decided after the probe · build phase 2.
 - If P4 fails: is "add by search" enough for onboarding, or does the wing keep a roster list on the site · the Administrator · build phase 5.
 
@@ -157,7 +155,7 @@ Each phase needs its own approval. The spec changes first if a probe result chan
 | Phase | Content | Blocked by |
 |---|---|---|
 | 0 | Probe round P1 to P9, then the platform decision (D14) | — |
-| 1 | Read-only: R1 to R4, R17 (and O1, O2 if kept) | P2 |
+| 1 | Read-only: R1 to R4, R17, R19, R20 | P2 |
 | 2 | Changes: R5, R13, R14, R15, R16 | P1, P5, P6 |
 | 3 | Requests: R6 | Phase 2 |
 | 4 | Setup, Sync leavers, rule builder: R7, R8, R10, R11 | P3 |
