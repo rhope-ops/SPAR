@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a project log (docs/LOG.md) against the project log rules (AGENTS.md "Project log" and .claude/project-log.md).
+"""Check a project log (docs/LOG.md) against the project log rules (AGENTS.md "Project log" and .claude/skills/project-log/SKILL.md).
 
 Usage:
     python3 scripts/log_check.py [FILE ...]        # default: docs/LOG.md
@@ -14,7 +14,7 @@ Checks (each failure prints FILE:LINE: message):
   YYYY-MM-DD HH:MM-YYYY-MM-DD HH:MM; "~" before the date or a time marks an estimate. Dates and times must exist.
 - Type is milestone, breakthrough, miss or decision.
 - Arc is kebab-case and has a row in the Arcs table; every Arcs row is used at least once.
-- Evidence is not empty and not "-" (.claude/project-log.md: never chat text alone).
+- Evidence is not empty and not "-" (.claude/skills/project-log/SKILL.md: never chat text alone).
 Exit 0 and "LOG CHECK PASS: N rows" when clean, exit 1 with the findings otherwise.
 It does not judge whether a row's type or text is right; that stays a human review.
 Standard library only. It reads files only; it never writes.
@@ -72,6 +72,7 @@ def tables(text):
 
 
 def valid_when(value):
+    """True when a When cell is a real date and time, or a range that does not run backwards."""
     m = WHEN_RE.match(value)
     if not m:
         return False
@@ -87,44 +88,30 @@ def valid_when(value):
     return True
 
 
-def check(path):
-    """Return (row_count, [finding, ...]) for one log file."""
-    p = pathlib.Path(path)
-    found = []
-    try:
-        text = p.read_text(encoding="utf-8")
-    except OSError as e:
-        return 0, [f"{p}: cannot read ({e.strerror})"]
-    t = tables(text)
-    if "Arcs" not in t:
-        found.append(f"{p}: no table under '## Arcs'")
-    if "Log" not in t:
-        found.append(f"{p}: no table under '## Log'")
-        return 0, found
+def check_arcs(p, table, found):
+    """Check the Arcs table; return ({arc: line_no}, [(line_no, arc, turning point)]) and add findings to found."""
     arcs, turns = {}, []
-    if "Arcs" in t:
-        ln, head, rows = t["Arcs"]
-        if head != ARC_COLS:
-            hint = (" (add Problem, Turning point and Lesson; write - until known. A baseline project:"
-                    " add them by hand, or with the kit's scripts/sync_baseline.py --apply)") if head == OLD_ARC_COLS else ""
-            found.append(f"{p}:{ln}: Arcs columns must be {' | '.join(ARC_COLS)}{hint}")
-        for ln, c in rows:
-            if head == ARC_COLS and len(c) != len(ARC_COLS):
-                found.append(f"{p}:{ln}: {len(c)} cells in Arcs row, need {len(ARC_COLS)}")
-            elif head == ARC_COLS:
-                turns.append((ln, c[0], c[4]))
-            if not c or not ARC_RE.match(c[0]):
-                found.append(f"{p}:{ln}: arc name {c[0] if c else ''!r} is not kebab-case")
-            elif c[0] in arcs:
-                found.append(f"{p}:{ln}: arc {c[0]!r} listed twice")
-            else:
-                arcs[c[0]] = ln
-    ln, head, rows = t["Log"]
-    if len(head) > 1 and re.fullmatch(r"When \(.+\)", head[1]):
-        head = head[:1] + ["When"] + head[2:]  # an older log names its zone in the header, for example "When (CT)"
-    if head != LOG_COLS:
-        found.append(f"{p}:{ln}: Log columns must be {' | '.join(LOG_COLS)}")
-        return len(rows), found
+    ln, head, rows = table
+    if head != ARC_COLS:
+        hint = (" (add Problem, Turning point and Lesson; write - until known. A baseline project:"
+                " add them by hand, or with the kit's scripts/sync_baseline.py --apply)") if head == OLD_ARC_COLS else ""
+        found.append(f"{p}:{ln}: Arcs columns must be {' | '.join(ARC_COLS)}{hint}")
+    for ln, c in rows:
+        if head == ARC_COLS and len(c) != len(ARC_COLS):
+            found.append(f"{p}:{ln}: {len(c)} cells in Arcs row, need {len(ARC_COLS)}")
+        elif head == ARC_COLS:
+            turns.append((ln, c[0], c[4]))
+        if not c or not ARC_RE.match(c[0]):
+            found.append(f"{p}:{ln}: arc name {c[0] if c else ''!r} is not kebab-case")
+        elif c[0] in arcs:
+            found.append(f"{p}:{ln}: arc {c[0]!r} listed twice")
+        else:
+            arcs[c[0]] = ln
+    return arcs, turns
+
+
+def check_log_rows(p, rows, arcs, found):
+    """Check each Log row; return (arcs used, row numbers) and add findings to found."""
     used, last, nums = set(), None, set()
     for ln, c in rows:
         if len(c) != len(LOG_COLS):
@@ -153,6 +140,31 @@ def check(path):
         used.add(arc)
         if evidence in ("", "-"):
             found.append(f"{p}:{ln}: Evidence is empty (a commit, file, test or measurement)")
+    return used, nums
+
+
+def check(path):
+    """Return (row_count, [finding, ...]) for one log file."""
+    p = pathlib.Path(path)
+    found = []
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return 0, [f"{p}: cannot read ({e.strerror})"]
+    t = tables(text)
+    if "Arcs" not in t:
+        found.append(f"{p}: no table under '## Arcs'")
+    if "Log" not in t:
+        found.append(f"{p}: no table under '## Log'")
+        return 0, found
+    arcs, turns = check_arcs(p, t["Arcs"], found) if "Arcs" in t else ({}, [])
+    ln, head, rows = t["Log"]
+    if len(head) > 1 and re.fullmatch(r"When \(.+\)", head[1]):
+        head = head[:1] + ["When"] + head[2:]  # an older log names its zone in the header, for example "When (CT)"
+    if head != LOG_COLS:
+        found.append(f"{p}:{ln}: Log columns must be {' | '.join(LOG_COLS)}")
+        return len(rows), found
+    used, nums = check_log_rows(p, rows, arcs, found)
     for aln, arc, turn in turns:
         refs = ROW_REF.findall(turn)
         if turn not in ("", "-") and not refs:
@@ -187,9 +199,11 @@ GOOD = """# Project log: Demo
 
 
 def self_test():
+    """Check GOOD and one broken copy per rule; prints one line per case and LOG CHECK TEST PASS or FAIL."""
     ok = True
 
     def expect(name, text, want):
+        """Check text as a log file: want None = no findings, else a finding that contains want."""
         nonlocal ok
         with tempfile.TemporaryDirectory() as d:
             f = pathlib.Path(d, "LOG.md")
@@ -223,6 +237,7 @@ def self_test():
 
 
 def main():
+    """Check each log file named (default docs/LOG.md); print the findings and LOG CHECK PASS or FAIL."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("files", nargs="*", default=["docs/LOG.md"])
     ap.add_argument("--test", action="store_true", help="run the self-test")
