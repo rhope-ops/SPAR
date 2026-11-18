@@ -1,6 +1,11 @@
+---
+name: delegate
+description: Use before you delegate work to a subagent, run more than one agent, write an agent brief, pick a model for a task, or review and merge a worker's branch. Gives the agents (scout, worker, reviewer), model routing by tier, the brief format, review and merge steps, lanes, and fallbacks for claude.ai chat.
+---
+
 # Orchestration: more than one agent
 
-Read this file when you delegate work or run more than one agent. AGENTS.md "Delegation" points here. The Administrator's decisions (2026-11-10): the orchestrator stays on the strongest model; models are chosen per task with the routing table below. Routing names tiers; the table below maps them to Claude models.
+AGENTS.md "Delegation" points here. Ask each agent for concise findings with evidence paths. The Administrator's decisions (2026-11-10): the orchestrator stays on the strongest model; models are chosen per task with the routing table below. Routing names tiers; the table below maps them to Claude models.
 
 ## Agents (.claude/agents/)
 
@@ -8,7 +13,7 @@ Read this file when you delegate work or run more than one agent. AGENTS.md "Del
 |---|---|---|---|
 | `scout` | haiku | Read, Grep, Glob | Searches, file lists, summaries of test or log output |
 | `worker` | sonnet | Read, Edit, Write, Bash, Grep, Glob; guard hook | One brief-ready task on its own branch |
-| `reviewer` | sonnet | Read, Grep, Glob, Bash; guard hook | Fresh review: diff and brief only |
+| `reviewer` | inherit (the author's tier) | Read, Grep, Glob, Bash; guard hook | Fresh review: diff and brief only |
 
 `scripts/worker_guard.py` (PreToolUse hook) blocks push to main or master, every force-push form, rebase, reset --hard, clean and branch deletes for `worker`; with `--readonly` it also blocks every git verb that changes the repo, for `reviewer`. It is a seat belt for honest mistakes, not a security boundary: it cannot see file writes or commands built at run time.
 
@@ -21,7 +26,7 @@ Route by tier. Pass a model on the call only where this table says "strong" for 
 | Search, file lists, summaries of test or log output | `scout` | fast |
 | Task from a brief | `worker` | standard |
 | Worker task that failed its checks 2 times, a refactor over 5+ files, a performance fix | `worker` | strong (model on the call) |
-| Fresh review of a routine diff | `reviewer` | standard |
+| Fresh review of a routine diff | `reviewer` | the author's tier (inherit) |
 | Fresh review of data or save migrations, git or hook tools, security, or a refactor that must not change behavior | `reviewer` | strong (model on the call) |
 | Merges, conflict choices, design, artifacts, deploys | orchestrator | strong |
 
@@ -68,11 +73,11 @@ Branch per worker: the branch the host requires (Claude cloud sessions: `claude/
 2. Update by merge, never rebase: `git checkout -B review/<branch> origin/<branch> && git merge origin/main`. When intents conflict, stop and list the choice for the Administrator.
 3. Fresh review: `reviewer` with only the diff and the brief. Verify each finding before you report it.
 4. Checks: the commands in AGENTS.md "Commands". Report before and after numbers.
-5. Merge: `git checkout main && git merge --no-ff review/<branch>`, confirm `git merge-base --is-ancestor origin/main HEAD`, push, verify origin/main. UI or design changes the Administrator has not approved wait for the Administrator's yes (AGENTS.md "Delivery").
+5. Merge: the steps of `.claude/skills/deliver/SKILL.md`.
 
 ## Lanes (fill in per project, in AGENTS.md "Project rules")
 
 | Lane | Owner | Files | May push to |
 |---|---|---|---|
-| Orchestrator | strongest available model (default: Claude Opus) | Everything not in another lane | main |
+| Orchestrator | strongest available model (default: Claude Opus) | Everything not in another lane | its own branch; merges by pull request |
 | Worker | `worker` subagent | Only its brief's files | its own branch (see "Branch per worker") |
