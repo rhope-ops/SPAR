@@ -59,6 +59,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|Write|Edit|NotebookEdit|SendMessage|Agent|Task|Artifact|ArtifactData|ArtifactComments|SendUserFile|WebFetch|WebSearch|mcp__github__.*(pull_request|issue|comment|review|create_or_update_file|push_files).*|mcp__Gmail__(send_message|reply|forward|create_draft|update_draft)|mcp__Claude_Docs__(batch|update|create)|mcp__Google_(Docs|Drive|Sheets)__.*|mcp__Google_Calendar__(create_event|update_event|respond_to_event)|mcp__ccd_session__spawn_task|mcp__claude-code-remote__(send_message|create_session|create_trigger|update_trigger|send_later|create_environment|update_environment))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/check.sh --hook || exit 2",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   },
   "sandbox": {
