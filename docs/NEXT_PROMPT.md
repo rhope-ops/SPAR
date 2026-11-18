@@ -5,7 +5,7 @@ Updated: 2026-11-15. Keep this file at 40 lines or fewer. The current request ov
 ## State
 
 - main: the agent kit plus the spec [docs/specs/spar.md](specs/spar.md), Status: Approved 2026-11-15, revised the same day (D17). No app code.
-- Kit: 2026.11.20 by sync (`python3 scripts/check_lock.py --status`); the next kit release arrives as one pull request (`.claude/skills/kit-update/SKILL.md`).
+- Kit: 2026.11.20.1 by sync (`python3 scripts/check_lock.py --status`); the next kit release arrives as one pull request (`.claude/skills/kit-update/SKILL.md`).
 - Platform changed on 2026-11-15 to a canvas Power App with flows (docs/DECISIONS.md).
 
 ## Open (in order)
