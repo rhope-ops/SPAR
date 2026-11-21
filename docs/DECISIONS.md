@@ -4,6 +4,7 @@ Newest first. Why the kit defaults are what they are: https://github.com/rhope-o
 
 | Date | Decision | By | Replaces |
 |---|---|---|---|
+| 2026-11-21 | Kit 6.0.0 → 10.0.0 sync (kit f397b52, no tag yet). Rules changed: README (new), Delegation, Caps and audit (cap 5,500), Instructions people follow (new hard rule). Project text kept. | the Administrator | — |
 | 2026-11-20 | Kit 6.0.0 synced from the merge commit 43ad952 (tag v6.0.0 not made yet): new default 'Skills', `efficiency` merged into `audit`, `data-change` rewritten, `scripts/skill_use.py`; kept: nothing to move (all Project rules and Commands unchanged; no efficiency PROJECT.md existed). | Agent (a recommendation until the owner merges) | - |
 | 2026-11-19 | kit 4.0.0 (synced from merge commit c8339c3; tag v4.0.0 not made yet), short name SPAR; kept: all Project rules and Commands unchanged. | the Administrator | — |
 | 2026-11-18 | Kit 3.2.0 by sync (kit commit 18896fc in `.check.lock`; kit pull request 62; no v3.2.0 tag yet, so synced from the merge commit; the kit 3.2.0 plan the owner approved on 2026-11-18): no rule text. `check_settings.py --migrate` renewed the kit header block of `.check` (comment lines only: the `content-max-bytes` help line is added, and the last header line names the Administrator, as this repo's copy of the kit does; no setting changed); new optional setting `audit-duplicate-ignore`; kit-only docs and wording fixes. From 3.0.0 it also brings 3.1.0: the optional `content-max-bytes` setting. | the Administrator | - |

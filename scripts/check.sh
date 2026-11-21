@@ -20,6 +20,10 @@
 #      workflow's content step does it; with --no-content the caller does it: the pre-push hook scans files and pushed
 #      commits in one run),
 #   5. the fleet format (scripts/fleet_harvest.py --check), when .check has the line `fleet: on`,
+#   5b. the site's shared parts (scripts/build_site.py --check: index.html says what README.md's site sections say;
+#      a project's own kinds in scripts/build_site_local.py), when README.md has a `<!-- site:` mark,
+#   5c. the steps a person follows (scripts/check_instructions.py), both lanes, when .check has `audit-instructions:`
+#      lines (else a SKIP line); a project's own module: scripts/check_instructions_local.py,
 #   6. scripts/check.local.sh, when it exists: this project's own tests (SKIP when missing: the review gate in
 #      .claude/skills/deliver/SKILL.md then guards main).
 # The checks run in parallel: each one works on its own temporary files. CHECK_SERIAL=1 runs them one at a time.
@@ -292,10 +296,16 @@ extension() {
 extension check_content_local scripts/check_content_local.py scripts/check_content_scan.py scripts/check_content_finders.py
 extension code_standard_gate scripts/code_standard_gate.py scripts/code_standard.py scripts/code_standard_parse.py \
   scripts/code_standard_docs.py scripts/check_settings.py
+selftest check_instructions scripts/check_instructions.py scripts/check_instructions_test.py scripts/check_settings.py \
+  -- python3 scripts/check_instructions.py --test
+extension check_instructions_local scripts/check_instructions_local.py scripts/check_instructions.py
 selftest skill_use scripts/skill_use.py -- python3 scripts/skill_use.py --test
 selftest fleet_harvest scripts/fleet_harvest.py scripts/fleet_harvest_test.py -- python3 scripts/fleet_harvest.py --test
 selftest check_blocks scripts/check_blocks.py .claude/settings.json -- python3 scripts/check_blocks.py --test
 selftest check_lock scripts/check_lock.py -- python3 scripts/check_lock.py --test
+selftest fulcrum_tokens scripts/fulcrum_tokens.py docs/brand/fulcrum.json docs/brand/fulcrum.css -- python3 scripts/fulcrum_tokens.py --test
+selftest build_site scripts/build_site.py -- python3 scripts/build_site.py --test
+extension build_site_local scripts/build_site_local.py scripts/build_site.py
 selftest first_use_check scripts/first_use_check.py scripts/check_blocks.py scripts/check_content.py scripts/check_content_scan.py -- python3 scripts/first_use_check.py --test
 # Kit only: projects have no sync tools. The drift self-test reads the kit's AGENTS.md and stop_check.py.
 selftest drift scripts/drift.py scripts/sync_baseline.py scripts/sync_merge.py AGENTS.md scripts/stop_check.py -- python3 scripts/drift.py --test
@@ -332,6 +342,8 @@ fi
 [ -f scripts/check_blocks.py ] && [ -f .claude/settings.json ] && run "deny rules" python3 scripts/check_blocks.py --settings
 # The kit files of a project are as the last sync wrote them (scripts/check_lock.py; the kit itself has no lock).
 [ -f scripts/check_lock.py ] && [ -f .check.lock ] && run "kit lock" python3 scripts/check_lock.py --verify
+# The site page says what the README says (scripts/build_site.py), when README.md has site sections.
+[ -f scripts/build_site.py ] && grep -qs -- '<!-- site:' README.md && run "site from README" python3 scripts/build_site.py --check
 
 if [ ! -f scripts/log_check.py ]; then
   :  # starter tier: no project log
@@ -356,6 +368,15 @@ fi
 # The fleet format (docs/reviews/2026-11-19-fleet-contract.md): both lanes, only where .check has the line `fleet: on`.
 if [ -f scripts/fleet_harvest.py ] && grep -Eq '^[[:space:]]*fleet: on[[:space:]]*$' .check 2>/dev/null; then
   run "fleet format" python3 scripts/fleet_harvest.py --check
+fi
+
+# The steps a person follows (AGENTS.md "Instructions people follow"): both lanes, on the files .check names.
+if [ -f scripts/check_instructions.py ]; then
+  if grep -Eq '^[[:space:]]*audit-instructions[[:space:]]*:' .check 2>/dev/null; then
+    run "instructions" python3 scripts/check_instructions.py
+  else
+    skip "instructions" "no audit-instructions: lines in .check: name the files whose steps a person follows"
+  fi
 fi
 
 if [ -f scripts/check.local.sh ]; then

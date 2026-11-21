@@ -66,12 +66,13 @@ def test_settings(root, git):
         (root / CHECK).write_text(line + "\n")
         assert code_config(root) == code_config(root / "none"), "an allowed string is not a setting: " + line
     for line, why in (("audit-every-day: 1", "unknown setting"), ("audit-budget-nope: 1", "unknown setting"),
-                      ("audit-every-days: 1.5", "whole number"), ("audit-budget-session_load_tokens: 5001", "never raise")):
+                      ("audit-every-days: 1.5", "whole number"), ("audit-budget-session_load_tokens: 5501", "never raise")):
         (root / CHECK).write_text(line + "\n")
         assert why in fails(audit_config, root), "an audit- line that is not valid fails: " + line
     assert code_config(root) == CODE_DEFAULTS, "a bad audit- line does not fail the code standard"
     test_gate_keys(root)
     test_third_party(root)
+    test_instructions(root)
     (root / CHECK).write_bytes(b"\xff\xfec\x00o\x00")
     assert "UTF-8" in fails(code_config, root), "a .check that is not UTF-8 fails"
     (root / CHECK).write_text("code-max-function-lines: 40\n")
@@ -93,6 +94,20 @@ def test_settings(root, git):
         assert fails(load_state, root), "a state file that is not valid fails: " + bad
     assert NAMES_CHECK.search("| x | `.check` |") and NAMES_CHECK.search("see .check.") \
         and not NAMES_CHECK.search(".check.lock and .check.state.json and x.check"), "a row names .check itself"
+
+
+def test_instructions(root):
+    """Self-test of `audit-instructions:` (the Administrator, 2026-11-21): a list key of globs, written back as the same lines.
+    Args:
+        root: a temporary git repo; its `.check` is left empty at the end.
+    """
+    (root / CHECK).write_text("audit-instructions: README.md\naudit-instructions: docs/**/*.html\n")
+    cfg = audit_config(root)
+    assert cfg["instructions"] == ["README.md", "docs/**/*.html"], "both lines are read: %s" % cfg
+    assert audit_lines(cfg) == ["audit-instructions: README.md", "audit-instructions: docs/**/*.html"], "written back"
+    (root / CHECK).write_text("audit-instructions:\n")
+    assert fails(audit_config, root), "an empty glob fails"
+    (root / CHECK).write_text("")
 
 
 def test_third_party(root):
@@ -280,7 +295,7 @@ def test_migrate(root, git):
                                                    f"{OLD_AUDIT} odd"), "the last line lists the dropped keys: " + said
     assert code_config(root) == code_from_old(old_code["config"]) == code_base(root, "HEAD")[0], \
         "the new settings equal the old ones, and the old file at the base is still read"
-    assert audit_config(root)["budgets"]["session_load_tokens"] == 5000, "a raised kit cap is not moved"
+    assert audit_config(root)["budgets"]["session_load_tokens"] == 5500, "a raised kit cap is not moved"
     before = {p.name: p.read_bytes() for p in root.iterdir() if p.is_file()}
     with contextlib.redirect_stdout(out):
         assert migrate(root) == 0, "a second run passes"
