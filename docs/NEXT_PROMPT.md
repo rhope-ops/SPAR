@@ -6,7 +6,7 @@ Updated: 2026-11-25. Keep this file at 40 lines or fewer. The current request ov
 
 - main: the agent kit plus the spec [docs/specs/spar.md](specs/spar.md), Status: Approved 2026-11-15, revised the same day (D17). No app code.
 - Kit: 11.1.0 (a629550, no tag yet) on branch claude/kit-11.1.0-sync, lane C, waits for the fleet coordinator's merge (fleet plan P5); main has 10.0.0 until then (`python3 scripts/check_lock.py --status`).
-- Next (P5): package mode, its own lane C pull request after the sync (`.claude/skills/kit-update/SKILL.md` "Package mode").
+- Package mode: branch claude/kit-package-mode (lane C), merges after the sync. Then a new session runs `scripts/check.sh --kit-install` (the SessionStart hook does it) before the checks.
 - Platform changed on 2026-11-15 to a canvas Power App with flows (docs/DECISIONS.md).
 
 ## Open (in order)
