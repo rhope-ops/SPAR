@@ -1,11 +1,11 @@
 # Next prompt: SPAR
 
-Updated: 2026-11-25. Keep this file at 40 lines or fewer. The current request overrides it.
+Updated: 2026-11-24. Keep this file at 40 lines or fewer. The current request overrides it.
 
 ## State
 
 - main: the agent kit plus the spec [docs/specs/spar.md](specs/spar.md), Status: Approved 2026-11-15, revised the same day (D17). No app code.
-- Kit: 11.1.0 (a629550, no tag yet) on branch claude/kit-11.1.0-sync, lane C, waits for its merge (fleet plan P5: the fleet coordinator merges for the Maintainer); main has 10.0.0 until then (`python3 scripts/check_lock.py --status`).
+- Kit: 11.1.0 (a629550, no tag yet) on branch claude/kit-11.1.0-sync, lane C: it needs the Maintainer's approval before it merges (AGENTS.md "Delivery"); no session merges it on the strength of this file; main has 10.0.0 until then (`python3 scripts/check_lock.py --status`).
 - Next (P5): package mode, its own lane C pull request after the sync (`.claude/skills/kit-update/SKILL.md` "Package mode").
 - Platform changed on 2026-11-15 to a canvas Power App with flows (docs/DECISIONS.md).
 
@@ -16,7 +16,10 @@ Updated: 2026-11-25. Keep this file at 40 lines or fewer. The current request ov
 
 ## Needs the Administrator
 
-- Turn on private vulnerability reporting (repository Settings › Advanced Security), then add `dod-security: on` to `.check` and sync again (kit 11.0.0 DoD step).
+- The kit 11.0.0 DoD step waits for the Maintainer:
+  1. The Maintainer turns on private vulnerability reporting (repository Settings › Advanced Security).
+  2. An agent then adds `dod-security: on` to `.check`.
+  3. The agent syncs the kit again (`.claude/skills/kit-update/SKILL.md`).
 
 - The word to start the build (phase 0), and the items in the spec's "Open questions".
 
