@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Self-test of scripts/code_standard.py (run by `python3 scripts/code_standard.py --test`; kept in its own file so
-the check stays under the 600-line cap of docs/code-standard.md C4).
+the check stays under the line cap of docs/code-standard.md C4).
 
 It builds small sample repos in a temporary folder and proves each rule of the check: clean files pass; a function
 without a comment, a long function, a grown function, a fixed item left in the baseline, a missing header, a shell
@@ -17,29 +17,18 @@ Credentials: none.
 """
 
 import json
-import shutil
 import subprocess
 import tempfile
+import unittest
 from pathlib import Path
 
 import check_settings as settings   # scripts/check_settings.py: the reader of .check and .check.state.json
-
-PS = bool(shutil.which('pwsh'))   # the PowerShell cases need the real parser
-SMALL = 'code-max-function-lines: 5\ncode-max-file-lines: 50\n'   # the caps of the sample repo, as .check lines
-FULL = 'code-c2: full\n'                                         # the kit's caps and the opt-in C2 full rule
-
-
-def write(root, lines, debt=None):
-    """Write the sample repo's .check (setting lines) and, when debt is given, its code standard baseline."""
-    (root / settings.CHECK).write_text(lines)
-    if debt is not None:
-        settings.save_part(root, 'code_standard', {'debt': debt})
-
-
-def config_of(root, lines):
-    """Write the sample repo's .check and return the settings the check reads from it."""
-    write(root, lines)
-    return settings.code_config(root)
+import code_standard_rules as rules   # scripts/code_standard_rules.py: LINTERS
+# scripts/code_standard_test_gate.py and scripts/code_standard_test_docs.py: more case groups (kept apart, rule C4).
+from code_standard_test_gate import (FULL, PS, SAMPLE_GATE, SMALL, commit, config_of, fails, main,  # noqa: F401
+                                     self_test_gate, self_test_gate_ratchet, write)
+from code_standard_test_docs import (self_test_adopt_ratchet, self_test_docs, self_test_docs_forms,  # noqa: F401
+                                     self_test_warns)
 
 
 def run(cs):
@@ -61,6 +50,52 @@ def run(cs):
         cs.GATE_FILE, cs.GATE = real_gate, None
     print('code standard self-test: pass')
     return 0
+
+
+def python_is_not_sized(cs, ROOT, g, good_py):
+    """A Python file over the file cap is not a C4 finding here: pylint warns about it (scripts/check.sh)."""
+    (ROOT / 'p.py').write_text(good_py + '#\n' * 50)
+    g('add', 'p.py')
+    assert cs.measure(config_of(ROOT, SMALL))['violations']['file_size'] == {}, 'a Python file is not measured for size here'
+    g('rm', '-qf', 'p.py')
+    python_for_the_linters(cs, ROOT, g, good_py)
+
+
+def python_for_the_linters(cs, ROOT, g, good_py):
+    """Ruff and pylint get the Python files this check covers: not an excluded or a generated file; a file with a
+    generated block only for parse and size, not for the line cap. A file that does not parse is no crash with
+    `code-c2: full`: the parse error is for the linters.
+
+    Args:
+        cs: the check module.
+        ROOT: the sample repo.
+        g: runs git in the sample repo.
+        good_py: the text of a sample Python file that passes.
+    """
+    (ROOT / 'vendor').mkdir(exist_ok=True)
+    (ROOT / 'x').mkdir(exist_ok=True)
+    (ROOT / 'vendor/v.py').write_text(good_py)
+    (ROOT / 'x/gen.py').write_text('# GENERATED from src/x.py by build.py\nx = 1\n')
+    (ROOT / 'x/blk.py').write_text(good_py + '# >>> s: generated from src/s.py by b.py\nx = 1\n# <<< s\n')
+    (ROOT / 'x/bad.py').write_text(good_py + 'def (:\n')
+    g('add', '-A')
+    config = config_of(ROOT, SMALL + FULL + 'code-exclude: vendor/**\ncode-generated: x/gen.py\n')
+    everything, lines = cs.python_files(config, 'all').split('\0')[:-1], cs.python_files(config, 'line').split('\0')[:-1]
+    assert 'vendor/v.py' not in everything and 'x/gen.py' not in everything, 'excluded and generated files: %s' % everything
+    assert {'x/blk.py', 'x/bad.py'} <= set(everything), 'a block file and a bad file are parsed and sized: %s' % everything
+    assert 'x/blk.py' not in lines and 'x/bad.py' in lines, 'a generated block: no line cap for that file: %s' % lines
+    (ROOT / 'vendor/v.sh').write_text('echo $1\n')
+    (ROOT / 'x/gen.sh').write_text('echo $1\n')
+    (ROOT / 'x/ok.sh').write_text('echo $1\n')
+    g('add', '-A')
+    config = config_of(ROOT, SMALL + FULL + 'code-exclude: vendor/**\ncode-generated: x/gen.sh\n')
+    assert cs.shell_files(config).split('\0')[:-1] == ['x/ok.sh'], 'shellcheck gets the covered shell files only: %r' % cs.shell_files(config)
+    kept = rules.LINTERS
+    for linters in (True, False):   # a file that does not parse: no traceback with `code-c2: full`
+        rules.LINTERS = linters
+        assert bool(cs.measure(config)['violations']['parse'].get('x/bad.py')) != linters, 'C10 here only without linters'
+    rules.LINTERS = kept
+    g('rm', '-rqf', 'vendor', 'x')
 
 
 def run_cases(cs, ROOT):
@@ -85,11 +120,20 @@ def run_cases(cs, ROOT):
         (ROOT / 'a.py').write_text(good_py)
         PS and (ROOT / 'b.ps1').write_text(good_ps)
         config = config_of(ROOT, SMALL)
-        assert config['caps'] == {'max_function_lines': 5, 'max_file_lines': 50}, 'the caps come from .check: %s' % config
+        assert config['caps'] == {'max_function_lines': 5, 'max_file_lines': 50, 'max_file_lines_paste': 600}, \
+            'the caps come from .check: %s' % config
         g('add', '.')
         m = cs.measure(config)
         assert not any(m['violations'].values()), 'clean files pass: %s' % m['violations']
         assert not PS or [f['name'] for f in m['files']['b.ps1']['functions']] == ['Get-Upper'], 'generated block skipped'
+        (ROOT / 'p.sh').write_text('# Sample shell file: it is over the file cap, for the check self-test only.\n' + '#\n' * 55)   # 57 lines: over the file cap 50 of SMALL
+        g('add', 'p.sh')
+        sizes = [cs.measure(config_of(ROOT, SMALL + extra))['violations']['file_size'] for extra in
+                 ('', 'code-paste: p.sh\n', 'code-paste: p.sh\ncode-max-file-lines-paste: 52\n')]
+        assert sizes == [{'p.sh': 57}, {}, {'p.sh': 57}], 'a `code-paste:` file has its own cap: %s' % sizes
+        g('rm', '-qf', 'p.sh')
+        python_is_not_sized(cs, ROOT, g, good_py)
+        config = config_of(ROOT, SMALL)
         (ROOT / 'a.py').write_text(good_py + '\n\ndef bare(x):\n    return x\n')
         new, fixed = cs.compare(cs.measure(config)['violations'], {}, config['caps'])
         assert len(new) == 1 and 'C2' in new[0] and 'a.py::bare' in new[0], 'a function without a comment fails: %s' % new
@@ -113,133 +157,7 @@ def run_cases(cs, ROOT):
         self_test_init(cs, ROOT)
         self_test_docs(cs, ROOT, g, config)
         self_test_gate(cs, ROOT, g)
-
-
-# A sample gate for self_test_gate: a line cap, a strict safety form, its own decision test and a refusal for new.py.
-SAMPLE_GATE = '''"""Sample gate of the code standard self-test (a project's own gate has this shape)."""
-RULES = {'line': ('C4 line longer than %d characters', 'max_line_chars')}
-OPT_IN = {'line': lambda c: 1 if c['caps'].get('max_line_chars') else 0}
-
-
-def file_rules(v, path, lines, head, config, skip):
-    """The sample per-file rules: the line cap, and for the strict safety form a header that starts with Network:."""
-    cap = config['caps'].get('max_line_chars')
-    longest = max(len(x) for x in lines)
-    if cap and longest > cap:
-        v['line'][path] = longest
-    if config.get('c1_safety') == 'strict' and not head.startswith('Network:'):
-        v['safety'][path] = 1
-
-
-def decided(root, ref):
-    """The sample decision test: the file OWNER-YES exists."""
-    return (root / 'OWNER-YES').exists(), ['REFUSED  sample gate: no OWNER-YES file']
-
-
-def new_debt_refusal(root, ref, kind, key):
-    """The sample refusal: no debt for new.py, whatever was decided."""
-    return 'FAIL  sample gate: no debt for new.py' if key.startswith('new.py') else None
-'''
-
-
-def self_test_gate(cs, root, g):
-    """Self-test of the extension point: with no gate file a setting that needs one fails; a gate that cannot be
-    imported, lacks an entry point or has a wrong shape fails; a good gate adds a debt kind, a per-file rule, its own
-    decision test, a refusal no decision lifts, and an opt-in kind for --adopt.
-
-    Args:
-        cs: the check module (its GATE_FILE points into an empty temporary folder).
-        root: the sample repo folder.
-        g: runs git in the sample repo.
-    """
-    for name in [p.name for p in root.iterdir() if p.name != '.git']:
-        g('rm', '-rqf', '--ignore-unmatch', name)
-    (root / 'docs').mkdir(exist_ok=True)
-    (root / 'docs' / 'DECISIONS.md').write_text('# Decisions\n')
-    (root / 'a.py').write_text('"""Sample module of the gate self-test: one long line and nothing else in it."""\nX = "' + 'x' * 120 + '"\n')
-    write(root, '', {})
-    commit(g, 'gate base')
-    assert main(cs) == 0 and cs.GATE is None, 'no gate file and no gate setting: the kit check runs alone'
-    for line in ('code-max-line-chars: 100\n', 'code-c1-safety: strict\n'):
-        write(root, line)
-        assert 'own gate' in fails(cs.load), 'a setting a gate enforces fails with no gate file: ' + line
-        assert main(cs) == 1, 'and the check fails: ' + line
-    cs.GATE_FILE.parent.mkdir()
-    for bad, why in (('import no_such_module_anywhere\n', 'cannot be loaded'), ('def f(:\n', 'cannot be loaded'),
-                     ('import sys\nsys.exit(0)\n', 'cannot be loaded'), ('raise SystemExit(1)\n', 'cannot be loaded'),
-                     (SAMPLE_GATE.replace('def decided', 'def undecided'), 'lacks decided'),
-                     (SAMPLE_GATE.replace("OPT_IN = {'line': lambda c: 1 if c['caps'].get('max_line_chars') else 0}", 'OPT_IN = []'), 'wrong shape'),
-                     (SAMPLE_GATE.replace("('C4 line longer than %d characters', 'max_line_chars')", "'C4 line'"), 'wrong shape')):
-        cs.GATE_FILE.write_text(bad)
-        write(root, '')
-        assert why in fails(cs.load), 'a gate that is broken or incomplete fails the load (%s)' % why
-        assert main(cs) == 1 and main(cs, '--update') == 1, 'and every run of the check, also with no gate setting (%s)' % why
-    cs.GATE_FILE.write_text(SAMPLE_GATE)
-    config = config_of(root, 'code-max-line-chars: 100\n')
-    assert cs.load()[0] == config and cs.GATE is not None, 'a good gate loads'
-    now = cs.measure(config)['violations']
-    assert now['line'] == {'a.py': 126}, "the gate's per-file rule writes its own debt kind: %s" % now
-    new, _ = cs.compare(now, {}, config['caps'])
-    assert new == ['FAIL  C4 line longer than 100 characters: a.py (126)'], "the gate's label and cap are used: %s" % new
-    assert cs.compare(now, {'line': {'a.py': 120}}, config['caps'])[0] == ['FAIL  C4 line longer than 100 characters: a.py grew from 120 to 126']
-    assert cs.compare({'line': {'a.py': 110}}, {'line': {'a.py': 126}}, config['caps'])[1], 'a gate kind with a cap is a size: smaller is fixed'
-    self_test_gate_ratchet(cs, root, config, now)
-    strict = config_of(root, 'code-c1-safety: strict\n')
-    assert cs.measure(strict)['violations']['safety'] == {'a.py': 1}, 'the gate enforces the strict safety form'
-    assert cs.level('safety', strict) == 2 and cs.level('safety', config_of(root, 'code-c1-safety: on\n')) == 1, 'strict is a higher level'
-    cs.GATE_FILE.unlink()
-    write(root, '', {})
-    assert main(cs) == 0 and cs.GATE is None, 'the gate file removed: the kit check runs alone again'
-
-
-def self_test_gate_ratchet(cs, root, config, now):
-    """Self-test of a gate in the comparison with main and in --adopt: the gate's decision test replaces the kit's,
-    its refusal lines are printed with a failure, a debt key it refuses fails whatever was decided, and its opt-in
-    kind is adopted once.
-
-    Args:
-        cs: the check module, with the sample gate loaded.
-        root: the sample repo folder (main has no `code-` line and an empty debt list).
-        config: the settings with the line cap of the sample gate.
-        now: the violations measured with them.
-    """
-    (root / 'docs' / 'DECISIONS.md').write_text('# Decisions\n| cap | `.check` |\n')   # the kit's test would accept this row
-    problems = cs.against_main(config, {})[0]
-    assert len(problems) == 2 and 'setting' in problems[0] and problems[1] == 'REFUSED  sample gate: no OWNER-YES file', \
-        "the gate's decision test replaces the kit's, and its refusal lines are printed: %s" % problems
-    assert 'added by hand' in ' '.join(cs.against_main(config, now)[0]), 'not decided: the new list is refused'
-    (root / 'OWNER-YES').write_text('')
-    assert cs.against_main(config, {})[0] == [], 'decided by the gate: the setting change passes'
-    assert cs.against_main(config, now)[0] == [], "decided, and the gate's opt-in kind is turned on now: its first list passes"
-    refused = cs.against_main(config, {'line': {'a.py': 126, 'new.py': 300}})[0]
-    assert refused == ['FAIL  sample gate: no debt for new.py'], 'a refused debt key fails whatever was decided: %s' % refused
-    assert main(cs, '--adopt') == 0 and cs.load()[1]['line'] == {'a.py': 126}, "--adopt lists the gate's opt-in kind"
-    assert main(cs, '--adopt') == 1, 'a second --adopt is refused'
-    assert main(cs) == 0, 'the check passes with the adopted list and the decision'
-    (root / 'OWNER-YES').unlink()
-    # The gate file is removed while main still holds debt of its kind: the rule would go in silence.
-    real_base, gate, decisions = cs.settings.code_base, cs.GATE, (root / 'docs' / 'DECISIONS.md')
-    kept = decisions.read_text()
-    cs.settings.code_base, cs.GATE = (lambda r, ref: ({}, {'line': {'a.py': 126}, 'length': {}})), None
-    try:
-        decisions.write_text('# Decisions\n')
-        gone = cs.against_main({}, {})[0]
-        assert len(gone) == 1 and 'main holds line debt, but no rule here knows that kind' in gone[0], \
-            'a debt kind of main that no rule knows fails (the gate is gone): %s' % gone
-        decisions.write_text('# Decisions\n| the gate is retired | `.check` |\n')
-        assert cs.against_main({}, {})[0] == [], "with the Administrator's row, removing the gate's rule passes"
-    finally:
-        cs.settings.code_base, cs.GATE = real_base, gate
-        decisions.write_text(kept)
-
-
-def fails(call, *args):
-    """Return the message of the ValueError that call(*args) raises, or '' when it raises none."""
-    try:
-        call(*args)
-    except ValueError as err:
-        return str(err)
-    return ''
+        self_test_warns(cs, ROOT, g, config)
 
 
 def self_test_kinds(cs, root, g, config):
@@ -339,34 +257,6 @@ def self_test_transition(cs, root, g):
     write(root, SMALL)
 
 
-def commit(g, message):
-    """Commit everything in the sample repo and make that commit origin/main."""
-    g('add', '-A')
-    g('-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-qm', message)
-    g('update-ref', 'refs/remotes/origin/main', 'HEAD')
-
-
-def main(cs, *args):
-    """Run cs.main() with these arguments, its output hidden; return its exit code.
-
-    Args:
-        cs: the check module.
-        args: the command-line arguments.
-
-    Returns:
-        The exit code of cs.main().
-    """
-    import contextlib
-    import io
-    import sys
-    saved, sys.argv = sys.argv, ['code_standard.py', *args]
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            return cs.main()
-    finally:
-        sys.argv = saved
-
-
 def self_test_forms(cs, root, g, config):
     """Self-test of function forms and comment places: shell `function name {` and a brace on the next line are found;
     a comment after a one-line function, or a file help header, is not that function's comment; a Python `#` line
@@ -397,7 +287,7 @@ def self_test_forms(cs, root, g, config):
     assert 'j.py::lead' not in v['comment'], 'a Python lead comment counts: %s' % v['comment']
     assert {'j.py::p', 'j.py::q'} <= set(v['duplicate']), 'docstring-only difference is a duplicate: %s' % v['duplicate']
     assert not any(k.startswith('k.js::') for k in v['comment'].keys() | v['length'].keys()), 'arrow: %s' % v['length']
-    assert v['parse'].get('l.py'), 'a Python parse error fails: %s' % v['parse']
+    assert bool(v['parse'].get('l.py')) != rules.LINTERS, 'a Python parse error: ruff and pylint, or here without them: %s' % v['parse']
     self_test_edges(cs, root, g, config)
     for f in ('h.sh', 'i.ps1', 'j.py', 'k.js', 'l.py'):
         (root / f).unlink(missing_ok=True)
@@ -472,100 +362,14 @@ def self_test_init(cs, root):
     assert main(cs, '--init') == 1, 'a second --init is refused'
 
 
-def self_test_docs(cs, root, g, config):
-    """Self-test of the opt-in C2 full rule (`code-c2: full`): a long function without full docs fails and --report names
-    the missing parts; complete Python, JavaScript and PowerShell docs pass; a short function needs only the lean
-    comment; --adopt lists the new rule's debt once and refuses a second time.
+class CodeStandardTest(unittest.TestCase):
+    """The cases of `python3 scripts/code_standard.py --test`, for `python3 -m unittest` and pytest. They run in order
+    in one test: they share one sample repo."""
 
-    Args:
-        cs: the check module.
-        root: the sample repo folder.
-        g: runs git in the sample repo.
-        config: the settings of the sample repo.
-    """
-    full = config_of(root, FULL)
-    body = '    y = x\n' * 9
-    (root / 'f.py').write_text('"""Sample module for the C2 full self-test: two long functions and a short one."""\n\n\n'
-                               'def bare(x, *rest):\n    """Adds."""\n' + body + '    return y\n\n\n'
-                               'def full(x):\n    """Adds.\n\n    Args:\n        x: a number.\n\n    Returns:\n        y.\n    """\n'
-                               + body + '    return y\n\n\ndef short(x):\n    """Adds."""\n    return x\n')
-    js = '// Sample JavaScript file for the C2 full self-test.\n/**\n * Adds.\n * @param {number} a first\n * @returns {number}\n */\n' \
-         'function good(a) {\n' + '  let y = a;\n' * 9 + '  return y;\n}\n// Adds.\nfunction bad(a, {b}) {\n' \
-         + '  let y = a;\n' * 9 + '  return y;\n}\n'
-    (root / 'g.js').write_text(js)
-    if PS:
-        lines = '  $y = 1\n' * 9
-        (root / 'h.ps1').write_text('<#\n  Sample PowerShell file for the C2 full self-test: one complete and one incomplete.\n#>\n\n'
-                                    '<#\n.SYNOPSIS\n  Adds.\n.PARAMETER Path\n  A path.\n#>\nfunction Get-Good([string]$Path) {\n'
-                                    + lines + '}\n# Adds.\nfunction Get-Bad([string]$Path) {\n' + lines + '}\n')
-    g('add', '.')
-    m = cs.measure(full)
-    docs = m['violations']['docs']
-    want = {'f.py::bare', 'g.js::bad'} | ({'h.ps1::Get-Bad'} if PS else set())
-    assert want <= set(docs) and not {'f.py::full', 'f.py::short', 'g.js::good', 'h.ps1::Get-Good'} & set(docs), \
-        'C2 full finds the long functions without full docs: %s' % docs
-    gaps = {f['name']: f.get('docs_missing') for f in m['files']['f.py']['functions']}
-    assert gaps['bare'] == ['Args: x', 'Args: rest', 'Returns:'], 'the report names the missing parts: %s' % gaps
-    jgaps = {f['name']: f.get('docs_missing') for f in m['files']['g.js']['functions']}
-    assert jgaps['bad'] == ['JSDoc'], 'a plain comment is not JSDoc: %s' % jgaps
-    self_test_docs_forms(cs.docs)
-    if PS:
-        g('rm', '-q', '--cached', '--', '*.ps1')   # the later steps need no PowerShell: each parser run costs a second
-    assert not cs.measure(config)['violations']['docs'], 'without `code-c2: full` the rule is off'
-    safe = config_of(root, FULL + 'code-c1-safety: on\n')
-    safety = cs.measure(safe)['violations']['safety']
-    assert 'f.py' in safety and 'g.js' in safety, 'C1 safety: a header without the three lines fails: %s' % safety
-    text = (root / 'f.py').read_text().replace('a short one."""', 'a short one.\n\nNetwork: none. Writes: none. Credentials: none.\n"""', 1)
-    (root / 'f.py').write_text(text)
-    assert 'f.py' not in cs.measure(safe)['violations']['safety'], 'C1 safety: the three lines pass'
-    write(root, FULL, {})
-    assert main(cs, '--adopt') == 0, '--adopt lists a rule that was just turned on'
-    assert set(cs.load()[1]['docs']) == want - {'h.ps1::Get-Bad'}, '--adopt writes its debt'
-    assert main(cs, '--adopt') == 1, 'a second --adopt is refused (the kind is listed now)'
-    self_test_adopt_ratchet(cs, root, g, full)
+    def test_self_test(self):
+        """Every case passes on the check module; its repo root is put back after the run."""
+        import code_standard  # scripts/code_standard.py: imported here, so a plain import of this file loads nothing
+        root = code_standard.ROOT
+        self.addCleanup(setattr, code_standard, 'ROOT', root)
+        self.assertEqual(run(code_standard), 0)
 
-
-def self_test_docs_forms(docs):
-    """Self-test of the parsing edge cases of scripts/code_standard_docs.py (found by the first fresh review): an arrow
-    function's parameter is read from its signature, not its body; a comma in a quoted default is not a separator; a
-    return in a nested callback is not the function's own; a Python Args: section ends at Returns:; a plain /* */
-    comment above a function is not JSDoc.
-
-    Args:
-        docs: the module scripts/code_standard_docs.py.
-    """
-    assert docs.js_params(['const f = x => {', '  foo(q);', '};'], 1) == ['x'], 'arrow parameter from the signature'
-    assert docs.js_params(['function f(a = ",", b) {', '}'], 1) == ['a', 'b'], 'a quoted comma is not a separator'
-    assert not docs.js_returns_value('  a.forEach(v => {\n    return v;\n  });\n}'), 'a nested return is not counted'
-    assert docs.js_returns_value('{\n  return 1;\n}'), 'a return under a `{` on its own line is counted'
-    assert docs.js_params(['const h = async x => {', '};'], 1) == ['x'], 'an async arrow parameter is read'
-    assert docs.js_missing(['/** K.', ' * @param {{a: number}} o', ' */', 'function k(o) {', '}'], 4, 4, '}') == [], \
-        'a JSDoc type with nested braces is read'
-    lead = docs.python_docs('def g(a, b):\n    """Do.\n\n    Args:\n        b: the value of\n            a value.\n    """\n    return None\n')
-    assert docs.python_missing(lead, 1) == ['Args: a'], 'a word in a continuation line is not an Args entry; return None is no value'
-    facts = docs.python_docs('def f(x, value):\n    """Do.\n\n    Args:\n        x: a.\n\n    Returns:\n        value: b.\n    """\n')
-    assert docs.python_missing(facts, 1) == ['Args: value'], 'Args: ends at Returns:'
-    lines = ['/** Other. */', 'function a() {', '}', '/* plain */', 'function b(z) {', '  return z;', '}']
-    assert docs.js_missing(lines, 5, 5, '  return z;\n}') == ['JSDoc'], 'a plain /* */ comment is not JSDoc'
-
-
-def self_test_adopt_ratchet(cs, root, g, full):
-    """Self-test of the ratchet around --adopt: a core rule is never adopted, and the comparison with main accepts a
-    first debt list only for an opt-in rule that was off on main, with a DECISIONS row.
-
-    Args:
-        cs: the check module.
-        root: the sample repo folder.
-        g: runs git in the sample repo.
-        full: the settings with `code-c2: full`.
-    """
-    write(root, 'code-c2: lean\n', {})
-    (root / 'docs' / 'DECISIONS.md').write_text('# Decisions\n')
-    commit(g, 'baseline')
-    lean = settings.code_config(root)
-    (root / 'docs' / 'DECISIONS.md').write_text('| row | names %s |\n' % settings.CHECK)
-    assert cs.against_main(lean, {'length': {'x.py::f': 99}})[0], 'a core rule debt added by hand fails, even with a DECISIONS row'
-    on = {'docs': {'f.py::bare': 1}}
-    assert not cs.against_main(full, on)[0], 'an opt-in rule turned on now: its first list passes with a DECISIONS row'
-    (root / 'docs' / 'DECISIONS.md').unlink()
-    assert cs.against_main(full, on)[0], 'the same list fails with no DECISIONS row'

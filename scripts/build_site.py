@@ -20,21 +20,25 @@ Outputs: with --write, index.html; then, or with --check alone, "SITE PASS" (or 
 Usage:   python3 scripts/build_site.py --write    rebuild the site's shared parts, then check
          python3 scripts/build_site.py --check    check only (scripts/check.sh runs it when README.md has site marks)
          python3 scripts/build_site.py --test     self-test; prints SITE TEST PASS
+Prevents: the site page and the README state the same fact in two hand-written copies that drift apart, so the page shows a stale or wrong fact
 Network: none.
 Writes: index.html with --write only (the self-test: temporary files).
 Credentials: none.
 """
 
 import argparse
-import html
 import importlib.util
 import re
 import sys
 import tempfile
+import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_site_html import (BOLD, README, build_intro, build_key_facts, fact_rows, inline,  # noqa: E402,F401
+                             paragraphs, refuse_marks)
+
 ROOT = Path(__file__).resolve().parent.parent
-README = 'README.md'
 SITE = 'index.html'
 LOCAL = 'scripts/build_site_local.py'
 COMMAND = 'scripts/build_site.py --write'
@@ -46,39 +50,9 @@ BLOCK = re.compile(r'^([ \t]*)<!-- >>> site:([a-z0-9-]+): generated from README\
 # Any site mark, also a broken one (a typo in a name or an end mark): each must be used by SECTION or BLOCK (stray_marks).
 README_MARK = re.compile(r'<!-- /?site:[^>]*-->')
 SITE_MARK = re.compile(r'<!-- (?:>>>|<<<) site:[^>]*-->')
-# Plain text in a site section may hold only these characters (an allow list): letters, digits, spaces and ordinary
-# punctuation that GitHub shows as typed. Any other character (* _ at a word's edge, ` ~ [ ] < > @ # = \ | ^ and the
-# like) could be Markdown that GitHub renders differently from this builder, so the check fails on it. An underscore
-# inside a word is plain text on GitHub (AFI33-332_DAFGM2026-01) and is allowed.
-PLAIN_TEXT = r"[A-Za-z0-9 .,;:'\"()\-/?!%+&‘’“”–—…]*"
-IN_WORD_UNDERSCORE = r'(?<=[A-Za-z0-9])_(?=[A-Za-z0-9])'
-# Strong text GitHub renders, in the forms this builder allows: "**" after the line start, a space, "(", a quote or
-# "-", before a non-space; the closing "**" after a non-space, before the line end, a space, punctuation, a quote or
-# "-". ("**x:**y" stays refused: GitHub cannot close it before a letter.)
-BOLD = (r'(?:(?<=^)|(?<=[\s("\'“‘-]))\*\*(?=[^\s*`])([^*`]*?[^\s*`])\*\*'
-        r'(?=$|[\s.,;:!?)"\'”’-])')
-# Rendered by GitHub although every character is on the allow list: HTML entities (also with digits, &frac12;),
-# emoji codes (:warning:; a name that starts with a letter, not right after a letter or digit, so 09:00-17:00 and
-# 1:2:3 pass), and web addresses of any scheme or case (ftp://, HTTP://, WWW.).
-ENTITY_OR_ADDRESS = (r'&(#\d+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);|(?<![A-Za-z0-9]):[A-Za-z_+][A-Za-z0-9_+-]*:'
-                     r'|[A-Za-z][A-Za-z0-9+.-]*://|(?i:www\.)')
-# A line that starts a list (also an empty item: "+" or "1." alone), is indented (an indented code block, or a
-# continuation GitHub may read differently), ends with a hard break, or underlines a heading ("===" or "---").
-LIST_START = r'([-+]|\d+[.)])(\s|$)'
-# Inside a paragraph, only a bullet or "1." starts a list on GitHub ("2026. That year." stays text).
-LIST_INTERRUPT = r'([-+]|1[.)])(\s|$)'
-INDENTED = r'[ \t]'
-SETEXT_LINE = r'\s*(=+|-+)\s*'
-HARD_BREAK = r'.*(  |\\)$'
 # A quote mark at a line's start, and a GitHub alert line; both are taken off before a section is built (unquote).
 QUOTE_MARK = r'^>[ \t]?'
 ALERT_LINE = r'\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]'
-# The key-facts table: plain HTML, because a Markdown table always shows a header row (33-332.Z, 2026-11-21). One row
-# per line, the label bold and ending in ":"; cells hold plain text only (no tags, no Markdown), and no "&" either: in
-# raw HTML a browser reads "&copy" as a symbol even without its ";", and the site would not. A row may end with a
-# source comment (FACT_SOURCE), which GitHub and the site do not show.
-FACT_TABLE = r'<table>\n((?:<tr>.*</tr>.*\n)+)</table>(.*)'
-FACT_ROW = r'<tr><td><b>([^<>*`&]+:)</b></td><td>([^<>*`&]+)</td></tr>(?: <!-- source: ([^<>]*[^<>\s-]) -->)?'
 
 
 def readme_sections(readme):
@@ -112,117 +86,6 @@ def unquote(markdown):
     """
     lines = [re.sub(QUOTE_MARK, '', line) for line in markdown.splitlines()]
     return '\n'.join(line for line in lines if not re.fullmatch(ALERT_LINE, line.strip()))
-
-
-def refuse_marks(markdown):
-    """Raise ValueError unless plain text (outside `code`, **bold** marks removed) holds only allow-listed characters.
-
-    Args:
-        markdown: one line of text, without its `code` spans.
-    """
-    text = re.sub(IN_WORD_UNDERSCORE, 'x', re.sub(BOLD, r'\1', markdown))
-    if not re.fullmatch(PLAIN_TEXT, text) or re.search(ENTITY_OR_ADDRESS, text):
-        raise ValueError(f'{README}: unsupported Markdown or character in a site section; only plain text, **bold** and '
-                         f'`code`: {markdown}')
-
-
-def inline(markdown):
-    """Turn one line of Markdown (text, **bold**, `code`) into escaped HTML; raise ValueError on any other Markdown.
-
-    Args:
-        markdown: one line of text; text inside `code` is kept as is and never made bold.
-    Returns:
-        The escaped HTML.
-    """
-    out = []
-    for piece in re.split(r'(`[^`]+`)', markdown):
-        if piece.startswith('`') and piece.endswith('`') and len(piece) > 1:
-            out.append('<code>' + html.escape(piece[1:-1], quote=False) + '</code>')
-            continue
-        refuse_marks(piece)
-        out.append(re.sub(BOLD, r'<strong>\1</strong>', html.escape(piece, quote=False)))
-    return ''.join(out)
-
-
-def paragraphs(markdown):
-    """Return the paragraphs of plain Markdown text (blank lines split them; lines inside one are joined).
-
-    Args:
-        markdown: text without a table.
-    Returns:
-        The paragraphs, each on one line.
-    Raises:
-        ValueError: when a line starts a list, is indented, underlines a heading or ends with a hard break.
-    """
-    lines = markdown.splitlines()
-    for number, line in enumerate(lines):
-        starts = number == 0 or not lines[number - 1].strip()
-        if (re.match(LIST_START if starts else LIST_INTERRUPT, line) or re.match(INDENTED, line)
-                or re.fullmatch(SETEXT_LINE, line) or re.fullmatch(HARD_BREAK, line)):
-            raise ValueError(f'{README}: a list, an indented line, a heading underline or a hard line break is not '
-                             f'supported in a site section: {line}')
-    return [' '.join(part.split()) for part in re.split(r'\n\s*\n', markdown) if part.strip()]
-
-
-def build_intro(markdown, indent):
-    """Return the site's intro paragraph.
-
-    Args:
-        markdown: the intro section: one paragraph.
-        indent: the indent of the block's start mark on the page.
-    Returns:
-        The HTML paragraph.
-    """
-    parts = paragraphs(markdown)
-    if len(parts) != 1:
-        raise ValueError(f'{README}: site:intro must be one paragraph')
-    return f'{indent}<p>{inline(parts[0])}</p>'
-
-
-def fact_rows(markdown, need_source):
-    """Return the key-facts rows (label, text) and the text after the table.
-
-    Args:
-        markdown: the key-facts section: an HTML table (FACT_TABLE, FACT_ROW), then optional text after a blank line.
-        need_source: True when every row must end with its source comment.
-    Returns:
-        A pair: the rows as (label, text) and the text after the table.
-    Raises:
-        ValueError: when the table or a row has another form, a cell holds more than plain text, or a source is missing.
-    """
-    match = re.fullmatch(FACT_TABLE, markdown, re.S)
-    lines = match.group(1).splitlines() if match else []
-    if not match or any(not re.fullmatch(FACT_ROW, line) for line in lines):
-        raise ValueError(f'{README}: site:key-facts must be <table>, then rows "<tr><td><b>Label:</b></td><td>text</td>'
-                         f'</tr>" (each may end with " <!-- source: ... -->"), one per line, then </table>')
-    rest = match.group(2)
-    if rest.strip() and not rest.startswith('\n\n'):
-        raise ValueError(f'{README}: text after the site:key-facts table needs a blank line')
-    rows = [re.fullmatch(FACT_ROW, line).groups() for line in lines]
-    missing = [label for label, _, source in rows if need_source and not source]
-    if missing:
-        raise ValueError(f'{README}: site:key-facts rows need " <!-- source: ... -->" (REQUIRE_FACT_SOURCE): '
-                         f'{", ".join(missing)}')
-    for cell in (cell for label, text, _ in rows for cell in (label, text)):
-        refuse_marks(cell)
-    return [(label, text) for label, text, _ in rows], rest
-
-
-def build_key_facts(markdown, indent, need_source=False):
-    """Return the site's aligned key-facts list and the lines after it.
-
-    Args:
-        markdown: the key-facts section (fact_rows).
-        indent: the indent of the block's start mark on the page.
-        need_source: True when every row must end with its source comment.
-    Returns:
-        The HTML: a definition list (label, text), then one small paragraph for each line after the table.
-    """
-    rows, rest = fact_rows(markdown, need_source)
-    items = ''.join(f'\n{indent}  <dt>{html.escape(label.strip(), quote=False)}</dt>'
-                    f'<dd>{html.escape(text.strip(), quote=False)}</dd>' for label, text in rows)
-    tail = ''.join(f'\n{indent}<p class="small mut">{inline(part)}</p>' for part in paragraphs(rest))
-    return f'{indent}<dl class="facts">{items}\n{indent}</dl>{tail}'
 
 
 def load_local(root):
@@ -540,6 +403,37 @@ def test_case(edit, page, local, expect, write):
         return not found and aside and (not whole or all(part in built for part in TEST_BUILT)) and 'source:' not in built, found
 
 
+# Hostile key-facts text (an end tag missing or misplaced, rows that nest or repeat): each must be refused or read in
+# under HOSTILE_SECONDS, because a regex with a repeated ".*" group (ReDoS) once took minutes on the first one.
+HOSTILE_SECONDS = 1
+HOSTILE_TABLES = (
+    ('no end tag, many rows', '<table>\n' + '<tr></tr>' * 5000 + ' x' * 5000),
+    ('no end tag, many lines', '<table>\n' + '<tr></tr> x\n' * 5000),
+    ('end tag not at a line start', '<table>\n' + '<tr></tr>\n' * 5000 + ' </table>'),
+    ('many row starts, no row end', '<table>\n' + '<tr>' * 20000 + '\n</table>'),
+    ('many tables', '<table>\n<tr></tr>\n' * 5000),
+)
+
+
+def hostile_test():
+    """Time fact_rows on each hostile table and print one line each.
+
+    Returns:
+        The number of tables that took HOSTILE_SECONDS or more.
+    """
+    slow = 0
+    for label, text in HOSTILE_TABLES:
+        start = time.monotonic()
+        try:
+            fact_rows(text, False)
+        except ValueError:
+            pass  # refused: the expected result for every hostile table
+        seconds = time.monotonic() - start
+        slow += seconds >= HOSTILE_SECONDS
+        print(('ok   ' if seconds < HOSTILE_SECONDS else 'FAIL ') + f'a hostile key-facts table is read in under {HOSTILE_SECONDS} s: {label} ({seconds:.2f} s)')
+    return slow
+
+
 def self_test():
     """Run every self-test case on invented files and print one line each.
 
@@ -551,6 +445,7 @@ def self_test():
         ok, found = test_case(edit, page, local, expect, write)
         failed += not ok
         print(('ok   ' if ok else 'FAIL ') + label + ('' if ok else f': {found}'))
+    failed += hostile_test()
     print('SITE TEST PASS' if not failed else 'SITE TEST FAIL')
     return 1 if failed else 0
 
