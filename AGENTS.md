@@ -66,6 +66,6 @@ These are defaults: how work normally goes here. The method is yours unless the 
 
 ## Project rules
 
-<!-- Add rules for this project below. Date each decision by the Administrator, for example "(the Administrator, 2026-11-09)". -->
-- Project log: https://claude.ai/artifact/9d1L6ydRrhwx1U2CXo7Dw2 (private Claude doc; the Administrator, 2026-11-14). This repo is public, so log entries never go in it.
-- Platform (the Administrator, 2026-11-15): a canvas Power App with Power Automate flows, one copy for each wing, imported by RADE. Spec: docs/specs/spar.md. No build until the Administrator approves the spec and asks; capability report: https://claude.ai/artifact/5KPZmF6FbJBB41wqG22C9w (private).
+<!-- Add rules for this project below. Date each decision by the Maintainer, for example "(the Maintainer, 2026-11-09)". -->
+- Project log: https://claude.ai/artifact/9d1L6ydRrhwx1U2CXo7Dw2 (private Claude doc; the Maintainer, 2026-11-14). This repo is public, so log entries never go in it.
+- Platform (the Maintainer, 2026-11-15): a canvas Power App with Power Automate flows, one copy for each wing, imported by RADE. Spec: docs/specs/spar.md. No build until the Maintainer approves the spec and asks; capability report: https://claude.ai/artifact/5KPZmF6FbJBB41wqG22C9w (private).
