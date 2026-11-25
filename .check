@@ -11,5 +11,3 @@
 #                           needs a docs/DECISIONS.md row that names this file)
 # An allowed string or a skip line is added only on the Administrator's request, never by an agent to get past a block (AGENTS.md "Guards and checks").
 profile: dod
-# Kit 11.0.0 (fleet v2 DEC 4): this repo has the DoD profile, so it takes the DoD security group (SECURITY.md, dependabot.yml, security.yml).
-dod-security: on
