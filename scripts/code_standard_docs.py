@@ -14,6 +14,7 @@ What it checks, for a function longer than SHORT_FUNCTION lines (a shorter one k
               returns a value
   Shell       not checked here (no parameter list); the lean C2 comment applies
 Inputs:  one file's text and the functions scripts/code_standard.py found in it. Outputs: the parts that are missing.
+Prevents: a function that needs full docs has no documented parameters or return value, so another unit cannot inspect it before running it
 Network: none.
 Writes: none.
 Credentials: none.
@@ -23,7 +24,7 @@ Run:     imported by scripts/code_standard.py; proved by `python3 scripts/code_s
 import ast
 import re
 
-SHORT_FUNCTION = 10   # lines; a function this short needs only the lean C2 comment (the Administrator's 3B, 2026-11-17)
+SHORT_FUNCTION = 10   # lines; a function this short needs only the lean C2 comment (the Maintainer's 3B, 2026-11-17)
 RETURNS_VALUE = re.compile(r'\breturn\s+[^\s;}]')   # `return x`, not a bare `return` or `return;`
 
 

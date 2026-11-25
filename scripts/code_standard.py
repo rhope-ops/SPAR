@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Code standard check: measures every source file of this repo against docs/code-standard.md and fails on new debt.
 
-Why: the Administrator, 2026-11-17: all code is lean, modular, commented and human-editable, and stays so as work continues.
+Why: the Maintainer, 2026-11-17: all code is lean, modular, commented and human-editable, and stays so as work continues.
 A written rule alone is not always obeyed, so this check fails a push or a pull request instead. The kit owns this
 file; a project gets it by sync, keeps its own settings in its `.check` file and its own stricter rules in its own
 gate file (below), never in a copy of this file.
@@ -14,10 +14,13 @@ What it measures (the rule numbers are those of docs/code-standard.md):
   C2 full        opt-in (`code-c2: full`): a function longer than 10 lines also documents each
                  parameter and its return value in its language's help form (scripts/code_standard_docs.py)
   C3 length      each function is at most `max_function_lines` lines long
-  C4 file size   each source file is at most `max_file_lines` lines long
+  C4 file size   WARN only (the Maintainer, 2026-11-23): a source file over `max_file_lines` lines (a `code-paste:` file:
+                 `max_file_lines_paste`) prints a WARN line with its size; it is not debt and not in the baseline
+  C1 prevents    FAIL in the kit, WARN in a project (AUD-1): a check entry point (check.sh or a hook runs it) has `Prevents: <defect>`
   C5 duplicate   no two functions in hand-written files have the same body (a copy must be generated, with a banner)
   C6 generated   each generated file says GENERATED near its top and names its source
-  C10 parse      each Python and PowerShell file parses
+  C10 parse      each PowerShell file parses; each Python file too, when ruff or pylint is not installed
+  Python parse (with both installed), line length and file size: ruff and pylint (ruff.toml, .pylintrc; check.sh) on `--python-files`
 A comment that is the file header, or a divider line ("# ----", "# ===="), does not count as a function's comment.
 A script block passed as an argument ($b.Add_Click({ ... })) is measured for C3 too, named by the call it is in.
 Settings: the `code-` lines of `.check` (caps, scope, opt-in rules; read by scripts/check_settings.py, which lists
@@ -27,12 +30,13 @@ started. A violation that is not in that list fails. A listed function that grew
 fails too, until the baseline is lowered in the same change (`--update`), so the list can only shrink and always
 matches the code. The baseline and the settings are compared with those on the merge base with origin/main: an added
 item, a raised value or a changed `code-` setting fails, unless the same change adds a row to docs/DECISIONS.md that
-names `.check` (the Administrator's decision). A merge base that still has the old .code-standard.json is compared from it.
+names `.check` (the Maintainer's decision). A merge base that still has the old .code-standard.json is compared from it.
 
 A project's own gate (the extension point): when the file scripts/code_standard_gate.py stands next to this one, the
 check loads it and calls it. The kit has no gate file. A gate that cannot be imported, or lacks one of the five names
 below, fails the check; so do the settings `code-max-line-chars` and `code-c1-safety: strict` with no gate file
-(they are a gate's to enforce). The self-test of this file runs without the gate; scripts/check.sh runs the gate's
+(they are a gate's to enforce). The kit's own gate scripts/code_standard_strict.py is that gate for a project that sets
+`code-strict-gate: on` and has no gate file of its own. The self-test of this file runs without the gate; scripts/check.sh runs the gate's
 own self-test (`python3 scripts/code_standard_gate.py --test`) when the gate file has one.
   RULES             {debt kind: (label, caps key or None)}: debt kinds the gate adds or relabels. With a caps key the
                     debt value is a size that may only go down, and the label holds one %d for the cap.
@@ -56,18 +60,18 @@ Usage:   python3 scripts/code_standard.py            check (scripts/check.sh run
          python3 scripts/code_standard.py --adopt    add the debt of a rule the baseline does not list yet (a rule just
                                                      turned on, such as `code-c2: full`); needs a DECISIONS row
          python3 scripts/code_standard.py --test     prove the check on small sample repos (scripts/code_standard_test.py)
+Prevents: code without a header, function comment, size limit or safety label is added, so the code grows hard to read and edit
 Network: none (it runs local git read commands, and pwsh to parse PowerShell files).
 Writes:  .check.state.json, only with --init, --update or --adopt (and Python's __pycache__ when it imports its modules).
 Credentials: none.
+Parts:   scripts/code_standard_rules.py (the rule table, the per-function measures), scripts/code_standard_ratchet.py
+         (the baseline against main, --adopt), scripts/code_standard_parse.py and scripts/code_standard_docs.py.
 Needs:   Python 3.8+, git, and pwsh 7 only when the repo has PowerShell files (the parser gives the function list).
 """
 
 import argparse
-import fnmatch
-import hashlib
 import importlib.util
 import json
-import os
 import re
 import subprocess
 import sys
@@ -76,17 +80,16 @@ from pathlib import Path
 import check_settings as settings   # scripts/check_settings.py: the reader of .check and of .check.state.json
 import code_standard_docs as docs   # scripts/code_standard_docs.py: the opt-in C2 full rule
 import code_standard_parse as parse   # scripts/code_standard_parse.py: headers, generated blocks, function finders
+import code_standard_ratchet as ratchet   # scripts/code_standard_ratchet.py: the baseline against main, and --adopt
+# scripts/code_standard_rules.py: the rule table and the measures of one function (kept apart, rule C4).
+from code_standard_rules import (LANGS, MIN_DUP_LINES, MIN_HEADER_CHARS, OPT_IN, PREVENTS, RULE, SAFETY_LABELS,  # noqa: F401
+                                 WARN_KINDS, entry_points, file_functions, function_rules, gate_settings, matches,
+                                 summary, unique_key, warn_lines)
 
 ROOT = Path(__file__).resolve().parent.parent
-LANGS = {'.py': 'python', '.ps1': 'powershell', '.psm1': 'powershell', '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.sh': 'shell'}
-MIN_HEADER_CHARS = 60      # a header shorter than this does not say what the file is for
-SAFETY_LABELS = ('Network:', 'Writes:', 'Credentials:')   # C1 safety: what a reviewer must find before a run
-# The opt-in rules: the debt kind of each and its level in a config (0 = off). Only these can be adopted later.
-OPT_IN = {'docs': lambda c: int(c.get('c2') == 'full'),
-          'safety': lambda c: 2 if c.get('c1_safety') == settings.STRICT else int(bool(c.get('c1_safety')))}
-MIN_DUP_LINES = 4          # a body this short (a one-line wrapper) is not counted as a duplicate
 # A project's own gate (the header lists its five names). GATE is the loaded module, or None: load() sets it.
 GATE_FILE = Path(__file__).resolve().parent / 'code_standard_gate.py'
+STRICT_FILE = Path(__file__).resolve().parent / 'code_standard_strict.py'   # the kit's strict rules: `code-strict-gate: on`
 GATE_NAMES = ('RULES', 'OPT_IN', 'file_rules', 'decided', 'new_debt_refusal')
 GATE = None
 
@@ -123,12 +126,6 @@ def load_gate(path=None):
         raise ValueError('the gate %s has a wrong shape: RULES is {kind: (label, caps key or None)}, OPT_IN is '
                          '{kind: function}, the three other names are functions' % path.name)
     return gate
-
-
-def gate_settings(config):
-    """Return the `code-` lines in a config that only a gate enforces (the check fails when one is set with no gate)."""
-    lines = ['code-' + settings.dash(c) for c in settings.OPT_IN_CAPS if c in config['caps']]
-    return lines + (['code-c1-safety: ' + settings.STRICT] if config.get('c1_safety') == settings.STRICT else [])
 
 
 def rules():
@@ -190,39 +187,12 @@ def lang_of(rel):
     return None
 
 
-def matches(rel, patterns):
-    """True when the path matches one of the glob patterns (fnmatch; `*` also matches `/`)."""
-    return any(fnmatch.fnmatch(rel, p) for p in patterns)
-
-
 # ---------------------------------------------------------------- measure ----------------------------------------------
-
-def file_functions(p, text, lang, ps):
-    """Return the functions of one source file, in the shapes parse.powershell_functions() gives.
-
-    Args:
-        p: the repo-relative path.
-        text: the whole file.
-        lang: its language (lang_of).
-        ps: the result of parse.powershell_functions() for the repo's PowerShell files.
-
-    Returns:
-        (functions, blocks, parse errors).
-    """
-    if lang == 'powershell':
-        return ps[p]
-    if lang == 'python':
-        try:
-            return parse.python_functions(text), [], []
-        except SyntaxError as err:
-            return [], [], ['line %s: %s' % (err.lineno, err.msg)]
-    pattern, mark = (parse.JS_FUNC, '//') if lang == 'js' else (parse.SH_FUNC, '#')
-    return parse.brace_functions(text, pattern, mark), [], []
 
 
 def file_rules(v, p, lines, head, config, skip):
-    """Write the per-file violations of one source file into `v`: C1 header, C1 safety and C4 file size; then a
-    project's own gate adds its per-file rules.
+    """Write the per-file violations of one source file into `v`: C1 header, C1 safety and C4 file size (a `code-paste:`
+    file against `max_file_lines_paste`); then a project's own gate adds its per-file rules.
 
     Args:
         v: the violations dict {kind: {key: value}}, changed in place.
@@ -236,43 +206,14 @@ def file_rules(v, p, lines, head, config, skip):
         v['header'][p] = 1
     if config.get('c1_safety') and not all(x in head for x in SAFETY_LABELS):
         v['safety'][p] = 1
-    if len(lines) > config['caps']['max_file_lines']:
+    paste = matches(p, config.get('paste', []))   # a script a person pastes into another tool: its own cap
+    if lang_of(p) != 'python' and len(lines) > config['caps']['max_file_lines_paste' if paste else 'max_file_lines']:
         v['file_size'][p] = len(lines)
     if GATE:
         GATE.file_rules(v, p, lines, head, config, skip)
 
 
-def function_rules(v, entry, p, lines, func, extra, ctx):
-    """Write the violations of one function into `v` (C2 comment, C2 full, C3 length) and note its body for C5.
-
-    Args:
-        v: the violations dict, changed in place.
-        entry: the report entry of the file; its "functions" list gets this function.
-        p: the repo-relative path.
-        lines: the file's lines.
-        func: (name, top, first line, last line, has inner comment, body text).
-        extra: the PowerShell parser's doc facts for this function, or None.
-        ctx: per-file facts: lang, head_last, seen (names so far), full (C2 full is on), py (python_docs or None),
-            cap (the function cap) and bodies ({body hash: [keys]}, shared by all files).
-    """
-    name, top, start, end, inner, body = func
-    key = unique_key(p, name, ctx['seen'])
-    size, commented = end - start + 1, inner or parse.has_comment_above(lines, top, ctx['head_last'])
-    entry['functions'].append({'name': name, 'start': start, 'lines': size, 'comment': commented})
-    if not commented:
-        v['comment'][key] = 1
-    gaps = docs.missing(ctx['lang'], lines, func, extra, ctx['py']) if ctx['full'] else []
-    if gaps:
-        v['docs'][key] = 1
-        entry['functions'][-1]['docs_missing'] = gaps
-    if size > ctx['cap']:
-        v['length'][key] = size
-    norm = '\n'.join(x.strip() for x in body.split('\n') if x.strip() and not x.strip().startswith(('#', '//')))
-    if norm.count('\n') + 1 >= MIN_DUP_LINES:
-        ctx['bodies'].setdefault(hashlib.sha256(norm.encode()).hexdigest()[:12], []).append(key)
-
-
-def measure_file(v, p, config, ps, bodies):
+def measure_file(v, p, config, ps, bodies, entries=()):
     """Measure one hand-written source file: its per-file rules, its functions and its script blocks.
 
     Args:
@@ -281,6 +222,7 @@ def measure_file(v, p, config, ps, bodies):
         config: the code standard settings.
         ps: the result of parse.powershell_functions() for the repo's PowerShell files.
         bodies: {body hash: [keys]} of the functions seen so far (rule C5), changed in place.
+        entries: the check entry points (entry_points): one of them needs a "Prevents:" header line (C1).
 
     Returns:
         The report entry of the file.
@@ -294,9 +236,16 @@ def measure_file(v, p, config, ps, bodies):
         v['parse'][p] = len(errors)
     skip = parse.generated_blocks(lines)
     file_rules(v, p, lines, head, config, skip)
-    full = config.get('c2') == 'full' and not errors
-    ctx = {'lang': lang, 'head_last': head_last, 'seen': {}, 'full': full, 'bodies': bodies,
-           'py': docs.python_docs(text) if full and lang == 'python' else None, 'cap': config['caps']['max_function_lines']}
+    if p in entries and not PREVENTS.search(head):
+        v['prevents'][p] = 1
+    full, py = config.get('c2') == 'full' and not errors, None
+    if full and lang == 'python':
+        try:
+            py = docs.python_docs(text)
+        except SyntaxError:   # the parse error is C10 (here, or ruff and pylint); no docs check on a file that does not parse
+            full = False
+    ctx = {'lang': lang, 'head_last': head_last, 'seen': {}, 'full': full, 'bodies': bodies, 'py': py,
+           'cap': config['caps']['max_function_lines']}
     for name, top, start, end, inner, body, *extra in funcs:
         if not any(a <= start <= b for a, b in skip):
             function_rules(v, entry, p, lines, (name, top, start, end, inner, body), extra[0] if extra else None, ctx)
@@ -308,6 +257,42 @@ def measure_file(v, p, config, ps, bodies):
         if end - start + 1 > ctx['cap']:
             v['length'][key] = end - start + 1
     return entry
+
+
+def python_files(config, kind):
+    """The Python files that scripts/check.sh gives to ruff and pylint: the hand-written files this check covers
+    (include, exclude and generated as for every rule). A file with a generated block is left out of the `line` list,
+    because the linters cannot skip the lines of a block (the strict gate measures its hand-written lines); its parse
+    and size stay in the `all` list.
+
+    Args:
+        config: the code standard settings.
+        kind: 'all' or 'line'.
+
+    Returns:
+        The paths, each followed by a NUL character.
+    """
+    out = ''
+    for p in tracked_files(config):
+        if lang_of(p) != 'python' or matches(p, config.get('generated', [])):
+            continue
+        if kind == 'line' and parse.generated_blocks((ROOT / p).read_text(encoding='utf-8-sig', errors='replace').split('\n')):
+            continue
+        out += p + '\0'
+    return out
+
+
+def shell_files(config):
+    """The shell files that scripts/check.sh gives to shellcheck: the hand-written shell files this check covers
+    (include, exclude and generated as for every rule).
+
+    Args:
+        config: the code standard settings.
+
+    Returns:
+        The paths, each followed by a NUL character.
+    """
+    return ''.join(p + '\0' for p in tracked_files(config) if lang_of(p) == 'shell' and not matches(p, config.get('generated', [])))
 
 
 def measure(config):
@@ -324,12 +309,12 @@ def measure(config):
     source = [p for p in files if p not in generated]
     ps = parse.powershell_functions(ROOT, [p for p in source if lang_of(p) == 'powershell'], config.get('c2') == 'full')
     report, v = {}, {k: {} for k in rules()}
-    bodies = {}
+    bodies, entries = {}, entry_points(ROOT)
     for p in generated:
         if not parse.is_generated_ok((ROOT / p).read_text(encoding='utf-8-sig', errors='replace').split('\n')):
             v['generated'][p] = 1
     for p in source:
-        report[p] = measure_file(v, p, config, ps, bodies)
+        report[p] = measure_file(v, p, config, ps, bodies, entries)
     for keys in bodies.values():
         if len(keys) > 1:
             for k in keys:
@@ -337,24 +322,7 @@ def measure(config):
     return {'files': report, 'violations': v}
 
 
-def unique_key(p, name, seen):
-    """Return the debt key of a function: "<path>::<name>", with "#2", "#3" for the next ones of the same name."""
-    seen[name] = seen.get(name, 0) + 1
-    return '%s::%s' % (p, name if seen[name] == 1 else '%s#%d' % (name, seen[name]))
-
-
 # ---------------------------------------------------------------- ratchet ----------------------------------------------
-
-# Each debt kind: its label, and for a kind whose debt value is a size (it may only go down) the cap it is measured
-# against (the label then holds one %d). A project's own gate may add kinds (rules()).
-RULE = {'header': ('C1 no header comment', None), 'comment': ('C2 function without a comment', None),
-        'length': ('C3 function longer than %d lines', 'max_function_lines'),
-        'file_size': ('C4 file longer than %d lines', 'max_file_lines'),
-        'duplicate': ('C5 same body as another function', None),
-        'generated': ('C6 generated file without a GENERATED banner', None),
-        'parse': ('C10 PowerShell or Python file that does not parse', None),
-        'safety': ('C1 safety: header without the Network:, Writes: and Credentials: lines', None),
-        'docs': ('C2 full: function without full docs (--report names the missing parts)', None)}
 
 
 def compare(now, debt, caps):
@@ -372,6 +340,8 @@ def compare(now, debt, caps):
     new, fixed = [], []
     table = rules()
     for kind, items in now.items():
+        if kind in WARN_KINDS:   # a warning: no FAIL, no baseline (warn_lines)
+            continue
         text, cap = table[kind]
         label = text % caps.get(cap, 0) if cap else text
         old = debt.get(kind, {})
@@ -392,64 +362,13 @@ def git(*args):
 
 
 def decided_at(ref):
-    """Return (True when this change records the Administrator's decision on `.check`, refusal lines). The kit's test: a line
-    that docs/DECISIONS.md gained against `ref` names `.check`. A project's own gate replaces the test."""
-    if GATE:
-        return GATE.decided(ROOT, ref)
-    return any(x.startswith('+') and settings.NAMES_CHECK.search(x)
-               for x in git('diff', ref, '--', 'docs/DECISIONS.md').stdout.split('\n')), []
+    """Return (decided, refusal lines) for this change against `ref` (scripts/code_standard_ratchet.py)."""
+    return ratchet.decided_at(sys.modules[__name__], ref)
 
 
 def against_main(config, debt):
-    """Compare the settings and the debt with those on the merge base with origin/main. An item added to the debt, a
-    value raised, or a changed `code-` setting is a problem, unless the same change records the Administrator's decision
-    (decided_at). An opt-in rule turned on or raised above main's level (--adopt) may list its debt with that
-    decision. A debt key that a project's gate refuses (new_debt_refusal) is a problem that no decision lifts.
-
-    Args:
-        config: the code standard settings of the working tree.
-        debt: the debt list of the working tree.
-
-    Returns:
-        (problem lines, note).
-    """
-    mb = git('merge-base', 'HEAD', 'origin/main')
-    if mb.returncode != 0:
-        if os.environ.get('CI'):
-            return ['FAIL  baseline: no merge base with origin/main, so the baseline cannot be compared'], ''
-        return [], 'WARN  baseline not compared with main (no origin/main here)'
-    ref = mb.stdout.strip()
-    try:
-        old = settings.code_base(ROOT, ref)
-    except ValueError as err:
-        return ['FAIL  baseline: the settings or the baseline on the merge base cannot be read (%s)' % err], ''
-    if old is None:
-        return [], 'NOTE  no baseline on main yet: this change starts it'
-    old_config, old_debt = old
-    decided, refusals = decided_at(ref)
-    # A debt kind that main holds and no rule here knows: the gate that owned it is gone, and its rule with it.
-    orphans = sorted(k for k, items in old_debt.items() if items and k not in rules())
-    problems = ['FAIL  baseline: main holds %s debt, but no rule here knows that kind (is %s missing?); removing a '
-                'rule needs a docs/DECISIONS.md row that names %s' % (k, GATE_FILE.name, settings.CHECK)
-                for k in orphans if not decided]
-    for kind, items in debt.items():
-        adopting = level(kind, config) > level(kind, old_config)
-        was = old_debt.get(kind, {})
-        for key, value in sorted(items.items()):
-            refused = GATE.new_debt_refusal(ROOT, ref, kind, key) if GATE and key not in was else None
-            if refused:
-                problems.append(refused)
-            elif adopting and decided:
-                continue   # an opt-in rule turned on or raised now (--adopt): its list is the Administrator's decision
-            elif key not in was:
-                problems.append('FAIL  baseline: %s item added by hand: %s' % (kind, key))
-            elif value > was[key]:
-                problems.append('FAIL  baseline: %s value raised: %s (%d to %d)' % (kind, key, was[key], value))
-    if config != old_config and not decided:
-        problems.append('FAIL  baseline: a `code-` setting of %s (caps, scope or an opt-in rule) changed with no '
-                        'docs/DECISIONS.md row that names %s (a cap or scope change is the Administrator\'s decision)'
-                        % (settings.CHECK, settings.CHECK))
-    return problems + (list(refusals) if problems and not decided else []), ''
+    """Return (problem lines, note): the settings and the debt against main (scripts/code_standard_ratchet.py)."""
+    return ratchet.against_main(sys.modules[__name__], config, debt)
 
 
 def load():
@@ -463,6 +382,10 @@ def load():
     global GATE
     GATE = load_gate()
     config = settings.code_config(ROOT)
+    if GATE is None and config.get('strict_gate'):   # a project's own gate file wins; the kit's strict rules are the fallback
+        GATE = load_gate(STRICT_FILE)
+        if GATE is None:
+            raise ValueError('`code-strict-gate: on` in %s needs %s, and it is missing' % (settings.CHECK, STRICT_FILE.name))
     needs = gate_settings(config)
     if needs and GATE is None:
         raise ValueError('`%s` in %s is enforced by a project\'s own gate, and there is no %s: add the gate or remove '
@@ -474,16 +397,23 @@ def load():
 
 def save(debt):
     """Write the debt list into .check.state.json (the parts of the other tools stay as they are)."""
-    settings.save_part(ROOT, 'code_standard', {'debt': debt})
+    settings.save_part(ROOT, 'code_standard', {'debt': {k: x for k, x in debt.items() if k not in WARN_KINDS}})
 
 
 def parse_args():
-    """Return the parsed command line (the usage: the header of this file)."""
+    """Parse the command line (the usage: the header of this file).
+
+    Returns:
+        The parsed arguments.
+    """
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--report', action='store_true', help='print every measurement as JSON')
     ap.add_argument('--update', action='store_true', help='lower the baseline to the debt that is left')
     ap.add_argument('--init', action='store_true', help='write the first baseline (only when the repo has none)')
     ap.add_argument('--adopt', action='store_true', help='add the debt of a rule the baseline does not list yet')
+    ap.add_argument('--python-files', choices=('all', 'line'), help='list the Python files that ruff and pylint check, NUL-separated '
+                    '(all: parse and size; line: also the line cap, so no file with a generated block)')
+    ap.add_argument('--shell-files', action='store_true', help='list the shell files that shellcheck checks, NUL-separated')
     ap.add_argument('--test', action='store_true', help='prove the check on small sample repos')
     return ap.parse_args()
 
@@ -503,6 +433,12 @@ def main():
     except ValueError as err:
         print('CODE-STANDARD fail: %s' % err)
         return 1
+    if args.python_files:
+        print(python_files(config, args.python_files), end='')
+        return 0
+    if args.shell_files:
+        print(shell_files(config), end='')
+        return 0
     existed = debt is not None
     if not existed and not args.init:
         print('CODE-STANDARD fail: no code standard baseline in %s; adopt the standard with --init '
@@ -540,7 +476,7 @@ def check(args, config, debt, m):
     new, fixed = compare(m['violations'], debt, config['caps'])
     hand, note = against_main(config, debt)
     new += hand
-    for line in new + fixed + ([note] if note else []):
+    for line in warn_lines(m['violations'], config['caps']) + new + fixed + ([note] if note else []):
         print(line)
     if args.update:
         if new:
@@ -551,46 +487,15 @@ def check(args, config, debt, m):
         return 0
     if fixed and not new:
         print('Debt was fixed: run python3 scripts/code_standard.py --update and commit the lower baseline.')
-    gate = ', gate %s active' % GATE_FILE.name if GATE else ''
+    gate = ', gate %s active' % Path(GATE.__file__).name if GATE else ''
     print('CODE-STANDARD %s (files=%d, debt: %s%s)' % ('fail' if new or fixed else 'pass', len(m['files']),
                                                       summary(m['violations']), gate))
     return 1 if new or fixed else 0
 
 
 def adopt(config, debt, now):
-    """Write the debt list of each opt-in rule that the settings turn on and the baseline holds no debt for yet, or
-    whose level the settings raised above the level on main (a stricter form of a rule that is on); refuse when there
-    is none. A core rule is never adopted, and the comparison with main accepts the list only for such a rule, so this
-    cannot add debt to a rule the ratchet already holds.
-
-    Args:
-        config: the code standard settings.
-        debt: the baseline's debt list.
-        now: the violations measured now.
-
-    Returns:
-        The exit code: 0 written, 1 refused.
-    """
-    mb = git('merge-base', 'HEAD', 'origin/main')
-    try:
-        old = settings.code_base(ROOT, mb.stdout.strip()) if mb.returncode == 0 else None
-    except ValueError:
-        old = None
-    main_config = old[0] if old else None   # the settings on the merge base, or None when there are none to read
-    raised = lambda k: main_config is not None and level(k, config) > level(k, main_config) >= 1   # on at main, stricter now
-    kinds = [k for k in rules() if level(k, config) and now.get(k) and (not debt.get(k) or raised(k))]
-    if not kinds:
-        print('CODE-STANDARD fail: no opt-in rule to adopt; use --update (it can only lower the baseline)')
-        return 1
-    save(dict(debt, **{k: now[k] for k in kinds}))
-    print('CODE-STANDARD adopted: %s (add a docs/DECISIONS.md row that names %s)' % (
-        ', '.join('%s %d' % (k, len(now[k])) for k in kinds), settings.CHECK))
-    return 0
-
-
-def summary(v):
-    """One line: the count of each kind of debt."""
-    return ', '.join('%s %d' % (k, len(items)) for k, items in v.items())
+    """--adopt: list the debt of an opt-in rule just turned on; return the exit code (scripts/code_standard_ratchet.py)."""
+    return ratchet.adopt(sys.modules[__name__], config, debt, now)
 
 
 if __name__ == '__main__':

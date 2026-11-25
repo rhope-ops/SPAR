@@ -2,6 +2,8 @@
 
 Newest first. Why the kit defaults are what they are: https://github.com/rhope-ops/archimedes_lever/blob/main/docs/DECISIONS.md. "By" = the Administrator for a decision. "By" = Agent for a recommendation that the Administrator has not approved yet.
 
+<!-- approval-quote-exempt-from: Kit 6.0.0 → 10.0.0 sync (kit f397b52, no tag yet). Rules changed: README (new), Delegation, Caps and audit (cap 5,500), Instructions people follow (new hard rule). Project text kept. -->
+
 | Date | Decision | By | Replaces |
 |---|---|---|---|
 | 2026-11-21 | Kit 6.0.0 → 10.0.0 sync (kit f397b52, no tag yet). Rules changed: README (new), Delegation, Caps and audit (cap 5,500), Instructions people follow (new hard rule). Project text kept. | the Administrator | — |

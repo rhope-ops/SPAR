@@ -5,7 +5,7 @@ description: Use before you delegate to a subagent, run more than one agent, wri
 
 # Orchestration: more than one agent
 
-AGENTS.md "Agents" points here. Ask each agent for concise findings with evidence paths. The Administrator's decisions (2026-11-10): the orchestrator stays on the strongest model; models are chosen per task with the routing table below. Routing names tiers; the table below maps them to Claude models.
+AGENTS.md "Agents" points here. Ask each agent for concise findings with evidence paths. The Maintainer's decisions (2026-11-10): the orchestrator stays on the strongest model; models are chosen per task with the routing table below. Routing names tiers; the table below maps them to Claude models.
 
 ## Agents (.claude/agents/)
 
@@ -15,7 +15,7 @@ AGENTS.md "Agents" points here. Ask each agent for concise findings with evidenc
 | `worker` | sonnet | Read, Edit, Write, Bash, Grep, Glob; guard hook | One brief-ready task on its own branch |
 | `reviewer` | inherit (the author's tier) | Read, Grep, Glob, Bash; guard hook | Fresh review: diff and brief only |
 
-`scripts/worker_guard.py` (PreToolUse hook) blocks push to main or master, every force-push form, rebase, reset --hard, clean and branch deletes for `worker`; with `--readonly` it also blocks every git verb that changes the repo, for `reviewer`. It is a seat belt for honest mistakes, not a security boundary: it cannot see file writes or commands built at run time.
+`scripts/worker_guard.py` (PreToolUse hook) blocks push to main or master, every force-push form, rebase, reset --hard, clean and branch deletes for `worker`; with `--readonly` it also blocks every git verb that changes the repo, and rm, rmdir, unlink and shred, for `reviewer`. It is a seat belt for honest mistakes, not a security boundary: it cannot see file writes or commands built at run time.
 
 ## Model routing
 
@@ -65,13 +65,16 @@ Branch per worker: the branch the host requires (Claude cloud sessions: `claude/
 - Done criteria that can be measured (numbers, test names, PASS lines).
 - Checks to run.
 - "No design decisions: list candidates with trade-offs."
+- "A blocked command or a blocked check stops the task: report it; do not run it another way and do not change the text to pass."
+- "Read each skill you need in full with the Read tool, never by grep or sed."
+- For a change made to pass a check: the design goal, not the metric (AGENTS.md "Fresh review").
 - The tier and model, when the routing table says strong.
 
 ## Review and merge
 
 1. Scope: `git diff --stat origin/main...origin/<branch>`. Flag files outside the brief.
-2. Update by merge (AGENTS.md "Git history"): `git checkout -B review/<branch> origin/<branch> && git merge origin/main`. When intents conflict, stop and list the choice for the Administrator.
-3. Fresh review: `reviewer` with only the diff and the brief. Verify each finding before you report it.
+2. Update by merge (AGENTS.md "Git history"): `git checkout -B review/<branch> origin/<branch> && git merge origin/main`. When intents conflict, stop and list the choice for the Maintainer.
+3. Fresh review: `reviewer` with only the diff and the brief. Verify each finding before you report it. Before the review, run `python3 scripts/worker_guard.py --scan origin/main...origin/<branch> <scratch folder>` on the worker's branch and scratch folder, and give its findings to the reviewer. Any workaround of a guard (a string rebuilt to pass the content check, a command wrapped in a file to pass the worker guard), in the diff or in scratch output, is a MAJOR finding.
 4. Checks: the commands in AGENTS.md "Commands". Report before and after numbers.
 5. Merge: the steps of `.claude/skills/deliver/SKILL.md`.
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Cheap bloat and drift metrics for a project repo, and the audit due date. Report only, unless --record.
 
+Prevents: the instruction files and the session load growing past their caps unseen, rule lines that change with no conflict
+check, a path that AGENTS.md names and that is gone, and a skill that is malformed.
+
 Usage:
     python3 scripts/bloat_check.py            # full report
     python3 scripts/bloat_check.py --brief    # one line (scripts/session_checkin.sh runs this)
@@ -23,6 +26,7 @@ Usage:
     python3 scripts/bloat_check.py --compare NAME=SECONDS ...   # compare times that a script measured with their
                                               # baselines; one TIME or WARN line; never fails (scripts/check.sh,
                                               # session_checkin.sh and the pre-push hook run it); --record stores them
+                                              # (code of --time and --compare: scripts/bloat_check_timing.py)
     python3 scripts/bloat_check.py --test     # self-test (scripts/bloat_check_test.py); prints BLOAT TEST PASS
 
 It measures:
@@ -31,7 +35,7 @@ It measures:
                   Caps for every repo (KIT_CAPS; a project can lower one, never raise it): 5,500 tokens (warning at
                   5,000) and 200 lines of AGENTS.md; over a cap fails --rules
     third-party   the names and descriptions of the skills and agents that `.check` names in `audit-third-party:`
-                  lines: counted apart from the session load, against their own kit cap of 1,500 tokens (the Administrator,
+                  lines: counted apart from the session load, against their own kit cap of 1,500 tokens (the Maintainer,
                   2026-11-20); over it fails --rules
     rules         list items in AGENTS.md (any marker, any indent; a wrapped line is part of its item): the kit
                   sections (the header, "## Commands" and the numbered ranking in "## Order of authority" are not
@@ -46,12 +50,21 @@ It measures:
     pointers      each `.claude/...`, `scripts/...` and `docs/...` path in backticks and each relative link in
                   AGENTS.md exists (text moved to a skill is not lost)
     readme        (--rules) when the AGENTS.md "- Purpose:" line is filled in: no README.md fails; a README.md whose
-                  first paragraph does not open with that purpose is a WARN line (AGENTS.md "README")
+                  first paragraph does not open with that purpose is a WARN line (AGENTS.md "One home")
     handoff       docs/NEXT_PROMPT.md lines
     duplicates    normalized text lines of 80+ characters found in 2 or more tracked files (not counted: the lines
                   of a generated block, between the marker lines "# >>> ... generated from ..." and "# <<< ...")
     big files     tracked files over the size budget
     audit due     days and commits on main since the last full audit (.check.state.json "audit": "last_audit")
+    tool rows     (--rules, T1) each tool file the repo owns has a docs/tools.md row, whose first cell names it: 3 candidate tools,
+                  or "none known" and the search terms; FAIL in the kit, WARN in a project (code: scripts/bloat_check_files.py)
+    script lines  (--rules, T2) the lines of scripts/*.py and *.sh against "script_lines": {"baseline": N} in the state file
+                  (`cat scripts/*.py scripts/*.sh | wc -l`); over it fails, and so does a baseline above main's with no DECISIONS row; no baseline: FAIL in the kit, SKIP in a project
+    role word     (--rules, T6) kit-synced text in the kit says "the Maintainer", not an old role word; FAIL in the kit, no check in a project
+    debt record   (--rules --gate, T5, kit) changed rule lines, a check entry point added to scripts/check.sh and a lower
+                  KIT_CAPS cap need a docs/reviews/*-debt.md file with the line "debt-check: <hash>" (the hash as the conflict gate)
+    fleet audit   (kit, R3) AUDIT DUE (fleet): kit.config.json "fleet": {"last_audit": "YYYY-MM-DD"} missing, over 14 days old,
+                  or older than a v* release tag at HEAD
     timings       (--time) wall time of each named command against its recorded baseline; (--compare) times that
                   a script measured itself: NAME is a timings key, NAME:STEP one of its "steps". Slower means over
                   max_slowdown (default +25%) and over min_slowdown_seconds (default 0.5 s), so noise on a small step
@@ -79,16 +92,19 @@ Credentials: none.
 import argparse
 import datetime
 import fnmatch
+import json
 import re
-import subprocess
 import sys
-import time
 from pathlib import Path
 
+import bloat_check_files  # scripts/bloat_check_files.py: the file checks and the full --rules report (kept apart, code standard C4)
 import check_settings  # scripts/check_settings.py: the reader of .check and the reader and writer of .check.state.json
 # scripts/bloat_check_rules.py: the rule census (kept apart, code standard C4). The names the self-test reads are listed.
-from bloat_check_rules import (conflict_hash, git, lint, main_lint, rule_lines, rules_report,  # noqa: F401
-                               start_read)
+from bloat_check_files import is_kit, rules_report  # noqa: F401 - the full --rules report (rule census + file checks)
+from bloat_check_rules import conflict_hash, git, lint, main_lint, rule_lines, start_read  # noqa: F401
+# scripts/bloat_check_timing.py: the timed commands and the baseline comparison (kept apart, code standard C4).
+from bloat_check_timing import (SHELL_CHARS, TIMING_DIRS, compare_times, run_timings, save_timings,  # noqa: F401
+                                timing_argv)
 
 STATE = check_settings.STATE
 DEFAULTS = check_settings.AUDIT_DEFAULTS  # the settings when .check has no `audit-` line
@@ -184,6 +200,31 @@ def big_files(root, files, kb):
                    if (root / rel).stat().st_size > kb * 1024), key=lambda f: -f[1])
 
 
+def fleet_audit_due(root, today, every_days=14):
+    """Why the fleet audit is due, or "" when it is not (the kit only: R3). Due when kit.config.json has no `fleet.last_audit`
+    date, when that date is more than every_days old, or when HEAD carries a kit release tag (v*) dated after it.
+
+    Args:
+        root: the repo root (a Path).
+        today: the date to count from (a datetime.date).
+        every_days: the days after which the audit is due again.
+
+    Returns:
+        The reason as a text, or "".
+    """
+    if not is_kit(root):
+        return ""
+    try:
+        last = datetime.date.fromisoformat(json.loads((root / "kit.config.json").read_text(encoding="utf-8"))["fleet"]["last_audit"])
+    except (ValueError, KeyError, TypeError, OSError):
+        return "no fleet.last_audit date in kit.config.json"
+    reasons = [f"{(today - last).days} days since {last}"] if (today - last).days > every_days else []
+    for tag in (git(root, "tag", "--points-at", "HEAD", "--list", "v[0-9]*", "--format=%(creatordate:short) %(refname:short)") or "").splitlines():
+        if tag.split()[0] > last.isoformat():
+            reasons.append(f"kit release {tag.split()[1]} is newer than {last}")
+    return "; ".join(reasons)
+
+
 def audit_due(root, cfg, today):
     """Why the full audit is due (days or commits since the last one, or never audited), or "" when it is not.
 
@@ -222,74 +263,6 @@ def audit_due(root, cfg, today):
     return "; ".join(reasons)
 
 
-def run_timings(root, cfg, record):
-    """Run each timed command that has a cmd; return (report rows, names slower or failed); record stores the new seconds.
-
-    Args:
-        root: the repo root (a Path).
-        cfg: the audit settings, with "timings".
-        record: True to store the new seconds in cfg.
-
-    Returns:
-        (report rows, names of the commands that were slower or failed).
-    """
-    rows, slow = [], []
-    for name, t in cfg.get("timings", {}).items():
-        if not t.get("cmd"):
-            continue  # measured by the script that runs it (--compare)
-        t0 = time.monotonic()
-        rc = subprocess.run(t["cmd"], shell=True, cwd=root, capture_output=True).returncode
-        secs = round(time.monotonic() - t0, 1)
-        base = t.get("seconds")
-        limit = t.get("max_slowdown", 0.25)
-        verdict = "FAILED" if rc else "new" if base is None else ("SLOWER" if secs > base * (1 + limit) else "ok")
-        if verdict in ("SLOWER", "FAILED"):
-            slow.append(name)
-        rows.append(f"  {name}: {secs} s (baseline {base or '-'} s, limit +{int(limit * 100)}%, exit {rc}) {verdict}")
-        if record and not rc:
-            t["seconds"] = secs
-    return rows, slow
-
-
-def compare_times(cfg, pairs, record=False):
-    """pairs: [(name, seconds)]; name is a timings key, or "key:step" for one of its "steps". Returns (line, slow).
-    Warn only: a slowdown is reported, never a failure (the Administrator, 2026-11-16).
-
-    Args:
-        cfg: the audit settings, with "timings"; record changes it in place.
-        pairs: the (name, seconds) pairs that a script measured.
-        record: True to store the seconds as the new baselines.
-
-    Returns:
-        (one TIME or WARN line, the texts of the slower ones).
-    """
-    timings = cfg.setdefault("timings", {})
-    slow, new, n = [], [], 0
-    for name, secs in pairs:
-        key, _, step = name.partition(":")
-        entry = timings.setdefault(key, {}) if record else timings.get(key, {})
-        base = entry.get("steps", {}).get(step) if step else entry.get("seconds")
-        limit = entry.get("max_slowdown", 0.25)
-        floor = entry.get("min_slowdown_seconds", 0.5)
-        if base is None:
-            new.append(name)
-        elif secs > base * (1 + limit) and secs - base >= floor:
-            slow.append(f"{step or key} {secs} s (baseline {base} s, +{round((secs / base - 1) * 100) if base else 999}%)")
-        n += 1
-        if record:
-            if step:
-                entry.setdefault("steps", {})[step] = secs
-            else:
-                entry["seconds"] = secs
-    if record:
-        return f"TIME  baseline recorded for {n} time(s) in {STATE}", []
-    if slow:
-        return ("WARN  slower than the baseline: " + "; ".join(slow) +
-                ". Next: .claude/skills/audit/SKILL.md, A slow run (a measured slowdown starts it)"), slow
-    tail = f"; no baseline yet for {len(new)} ({', '.join(new)}): .claude/skills/audit/SKILL.md, Record a baseline" if new else ""
-    return f"TIME  baseline: {n - len(new)} of {n} within the limit{tail}", []
-
-
 def main_compare(root, items, record):
     """--compare: print one TIME or WARN line for NAME=SECONDS items; --record stores them. Always 0.
 
@@ -312,11 +285,6 @@ def main_compare(root, items, record):
         save_timings(root, cfg["timings"])
     print(line)
     return 0
-
-
-def save_timings(root, timings):
-    """Write timings into .check.state.json and keep its other parts."""
-    check_settings.save_part(root, "timings", timings)
 
 
 def report(root, args, today=None):
@@ -360,8 +328,12 @@ def report(root, args, today=None):
     if args.record and args.time:
         save_timings(root, cfg.get("timings", {}))
 
-    tail = (f"AUDIT DUE ({due}): tell the Administrator and ask whether to run the audit skill (.claude/skills/audit/SKILL.md, "
+    tail = (f"AUDIT DUE ({due}): tell the Maintainer and ask whether to run the audit skill (.claude/skills/audit/SKILL.md, "
             "about 1 hour of agent time); never start it unasked") if due else "audit not due"
+    fleet = fleet_audit_due(root, today)
+    if fleet:
+        tail += (f" · AUDIT DUE (fleet: {fleet}): tell the Maintainer and ask whether to run the fleet audit "
+                 "(.claude/skills/audit/SKILL.md, section Fleet audit); never start it unasked")
     if args.brief:
         print(f"bloat:       {r_rows[0][13:]} · duplicate lines "
               f"{len(dups)} · big files {len(big)} · over: {', '.join(over) or 'none'}{' · ' + warn if warn else ''} · {tail}")
